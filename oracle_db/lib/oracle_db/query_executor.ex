@@ -148,6 +148,34 @@ defmodule OracleDb.QueryExecutor do
     end
   end
 
+  def execute_parsed(storage, {:create_type, info}) do
+    type_name = String.upcase(info.name)
+
+    case Storage.create_type(storage, info.name, info) do
+      :ok -> {:ok, %{message: "Type #{type_name} created"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:drop_type, info}) do
+    type_name = String.upcase(info.name)
+    force = Map.get(info, :force, false)
+
+    case Storage.drop_type(storage, info.name, force) do
+      :ok -> {:ok, %{message: "Type #{type_name} dropped"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:alter_type, info}) do
+    type_name = String.upcase(info.name)
+
+    case Storage.alter_type(storage, info.name, info.action, info.details) do
+      :ok -> {:ok, %{message: "Type #{type_name} altered"}}
+      error -> error
+    end
+  end
+
   def execute_parsed(_storage, {:error, _} = error) do
     error
   end

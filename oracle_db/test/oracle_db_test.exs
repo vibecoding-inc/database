@@ -456,4 +456,130 @@ defmodule OracleDbTest do
       assert {:error, _} = result
     end
   end
+
+  describe "Object-Relational Types" do
+    test "CREATE TYPE creates an object type", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE TYPE address_type AS OBJECT (
+            street VARCHAR2(100),
+            city VARCHAR2(50),
+            zip_code VARCHAR2(10)
+          )
+        """)
+
+      assert {:ok, %{message: "Type ADDRESS_TYPE created"}} = result
+    end
+
+    test "CREATE TYPE with methods", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE TYPE person_type AS OBJECT (
+            first_name VARCHAR2(50),
+            last_name VARCHAR2(50),
+            birth_date DATE,
+            MEMBER FUNCTION get_full_name RETURN VARCHAR2
+          )
+        """)
+
+      assert {:ok, %{message: "Type PERSON_TYPE created"}} = result
+    end
+
+    test "CREATE OR REPLACE TYPE replaces existing type", %{db: db} do
+      OracleDb.execute(db, "CREATE TYPE test_type AS OBJECT (a NUMBER)")
+
+      result =
+        OracleDb.execute(db, """
+          CREATE OR REPLACE TYPE test_type AS OBJECT (
+            a NUMBER,
+            b VARCHAR2(50)
+          )
+        """)
+
+      assert {:ok, %{message: "Type TEST_TYPE created"}} = result
+    end
+
+    test "CREATE TYPE AS TABLE (nested table)", %{db: db} do
+      result = OracleDb.execute(db, "CREATE TYPE phone_list AS TABLE OF VARCHAR2(20)")
+      assert {:ok, %{message: "Type PHONE_LIST created"}} = result
+    end
+
+    test "CREATE TYPE AS VARRAY", %{db: db} do
+      result = OracleDb.execute(db, "CREATE TYPE color_array AS VARRAY(10) OF VARCHAR2(20)")
+      assert {:ok, %{message: "Type COLOR_ARRAY created"}} = result
+    end
+
+    test "DROP TYPE removes a type", %{db: db} do
+      OracleDb.execute(db, "CREATE TYPE temp_type AS OBJECT (id NUMBER)")
+      result = OracleDb.execute(db, "DROP TYPE temp_type")
+      assert {:ok, %{message: "Type TEMP_TYPE dropped"}} = result
+    end
+
+    test "DROP TYPE with FORCE option", %{db: db} do
+      OracleDb.execute(db, "CREATE TYPE force_type AS OBJECT (id NUMBER)")
+      result = OracleDb.execute(db, "DROP TYPE force_type FORCE")
+      assert {:ok, %{message: "Type FORCE_TYPE dropped"}} = result
+    end
+
+    test "ALTER TYPE ADD ATTRIBUTE", %{db: db} do
+      OracleDb.execute(db, "CREATE TYPE modify_type AS OBJECT (id NUMBER)")
+      result = OracleDb.execute(db, "ALTER TYPE modify_type ADD ATTRIBUTE name VARCHAR2(100)")
+      assert {:ok, %{message: "Type MODIFY_TYPE altered"}} = result
+    end
+
+    test "ALTER TYPE DROP ATTRIBUTE", %{db: db} do
+      OracleDb.execute(db, "CREATE TYPE drop_attr_type AS OBJECT (id NUMBER, name VARCHAR2(100))")
+      result = OracleDb.execute(db, "ALTER TYPE drop_attr_type DROP ATTRIBUTE name")
+      assert {:ok, %{message: "Type DROP_ATTR_TYPE altered"}} = result
+    end
+
+    test "CREATE TYPE with inheritance (UNDER)", %{db: db} do
+      OracleDb.execute(db, "CREATE TYPE base_type AS OBJECT (id NUMBER)")
+
+      result =
+        OracleDb.execute(db, """
+          CREATE TYPE derived_type UNDER base_type (
+            name VARCHAR2(100)
+          )
+        """)
+
+      assert {:ok, %{message: "Type DERIVED_TYPE created"}} = result
+    end
+
+    test "CREATE TYPE with constructor", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE TYPE employee_type AS OBJECT (
+            emp_id NUMBER,
+            emp_name VARCHAR2(100),
+            CONSTRUCTOR FUNCTION employee_type(id NUMBER) RETURN SELF AS RESULT
+          )
+        """)
+
+      assert {:ok, %{message: "Type EMPLOYEE_TYPE created"}} = result
+    end
+
+    test "CREATE TYPE with static method", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE TYPE util_type AS OBJECT (
+            value NUMBER,
+            STATIC FUNCTION create_default RETURN util_type
+          )
+        """)
+
+      assert {:ok, %{message: "Type UTIL_TYPE created"}} = result
+    end
+
+    test "returns error for duplicate type creation", %{db: db} do
+      OracleDb.execute(db, "CREATE TYPE dup_type AS OBJECT (id NUMBER)")
+      result = OracleDb.execute(db, "CREATE TYPE dup_type AS OBJECT (id NUMBER)")
+      assert {:error, _} = result
+    end
+
+    test "returns error for dropping non-existent type", %{db: db} do
+      result = OracleDb.execute(db, "DROP TYPE nonexistent_type")
+      assert {:error, _} = result
+    end
+  end
 end

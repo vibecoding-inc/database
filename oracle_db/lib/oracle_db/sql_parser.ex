@@ -727,7 +727,359 @@ defmodule OracleDb.SqlParser do
       ["INDEX" | rest] -> parse_create_index(rest)
       ["UNIQUE", "INDEX" | rest] -> parse_create_index(rest, true)
       ["SEQUENCE" | rest] -> parse_create_sequence(rest)
+      ["TYPE" | rest] -> parse_create_type(rest)
+      ["OR", "REPLACE", "TYPE" | rest] -> parse_create_type(rest, true)
       _ -> {:error, "Unknown CREATE command"}
+    end
+  end
+
+  # Parse CREATE TYPE statement for object-relational types
+  defp parse_create_type(tokens, replace \\ false) do
+    case tokens do
+      [type_name, "AS", "OBJECT", "(" | rest] ->
+        {attributes, methods} = parse_type_attributes(rest)
+
+        {:create_type,
+         %{
+           name: type_name,
+           kind: :object,
+           attributes: attributes,
+           methods: methods,
+           replace: replace
+         }}
+
+      [type_name, "AS", "TABLE", "OF" | rest] ->
+        {element_type, _remaining} = parse_element_type(rest)
+
+        {:create_type,
+         %{
+           name: type_name,
+           kind: :nested_table,
+           element_type: element_type,
+           replace: replace
+         }}
+
+      [type_name, "AS", "VARRAY", "(" | rest] ->
+        {size, element_type} = parse_varray_def(rest)
+
+        {:create_type,
+         %{
+           name: type_name,
+           kind: :varray,
+           max_size: size,
+           element_type: element_type,
+           replace: replace
+         }}
+
+      [type_name, "UNDER", parent_type, "(" | rest] ->
+        {attributes, methods} = parse_type_attributes(rest)
+
+        {:create_type,
+         %{
+           name: type_name,
+           kind: :object,
+           parent: parent_type,
+           attributes: attributes,
+           methods: methods,
+           replace: replace
+         }}
+
+      _ ->
+        {:error, "Invalid CREATE TYPE syntax"}
+    end
+  end
+
+  defp parse_type_attributes(tokens) do
+    parse_type_attributes(tokens, [], [])
+  end
+
+  defp parse_type_attributes([")" | _], attrs, methods) do
+    {Enum.reverse(attrs), Enum.reverse(methods)}
+  end
+
+  defp parse_type_attributes([], attrs, methods) do
+    {Enum.reverse(attrs), Enum.reverse(methods)}
+  end
+
+  defp parse_type_attributes(["," | rest], attrs, methods) do
+    parse_type_attributes(rest, attrs, methods)
+  end
+
+  defp parse_type_attributes([token | rest], attrs, methods) when is_binary(token) do
+    case String.upcase(token) do
+      "MEMBER" ->
+        {method, remaining} = parse_type_method(rest)
+        parse_type_attributes(remaining, attrs, [method | methods])
+
+      "CONSTRUCTOR" ->
+        {method, remaining} = parse_constructor_method(rest)
+        parse_type_attributes(remaining, attrs, [method | methods])
+
+      "STATIC" ->
+        {method, remaining} = parse_static_method(rest)
+        parse_type_attributes(remaining, attrs, [method | methods])
+
+      "MAP" ->
+        {method, remaining} = parse_map_method(rest)
+        parse_type_attributes(remaining, attrs, [method | methods])
+
+      "ORDER" ->
+        {method, remaining} = parse_order_method(rest)
+        parse_type_attributes(remaining, attrs, [method | methods])
+
+      _ ->
+        # Parse attribute: name type
+        {attr, remaining} = parse_type_attribute([token | rest])
+        parse_type_attributes(remaining, [attr | attrs], methods)
+    end
+  end
+
+  defp parse_type_attributes([_ | rest], attrs, methods) do
+    parse_type_attributes(rest, attrs, methods)
+  end
+
+  defp parse_type_attribute([name, type | rest]) do
+    {type_info, remaining} = parse_attribute_type([type | rest])
+    {{name, type_info}, remaining}
+  end
+
+  defp parse_type_attribute([name | rest]) do
+    {{name, :unknown}, rest}
+  end
+
+  defp parse_attribute_type([type | rest]) do
+    case String.upcase(type) do
+      t when t in ["VARCHAR2", "VARCHAR", "CHAR", "NVARCHAR2", "NCHAR"] ->
+        case rest do
+          ["(" | more] ->
+            {size, remaining} = parse_type_size_spec(more)
+            {{:string, t, size}, remaining}
+
+          _ ->
+            {{:string, t, nil}, rest}
+        end
+
+      t
+      when t in [
+             "NUMBER",
+             "NUMERIC",
+             "DECIMAL",
+             "INTEGER",
+             "INT",
+             "SMALLINT",
+             "FLOAT",
+             "REAL",
+             "DOUBLE"
+           ] ->
+        case rest do
+          ["(" | more] ->
+            {precision, remaining} = parse_type_size_spec(more)
+            {{:number, t, precision}, remaining}
+
+          _ ->
+            {{:number, t, nil}, rest}
+        end
+
+      t when t in ["DATE", "TIMESTAMP", "INTERVAL"] ->
+        {{:datetime, t}, rest}
+
+      t when t in ["CLOB", "BLOB", "NCLOB", "BFILE"] ->
+        {{:lob, t}, rest}
+
+      t when t in ["REF"] ->
+        case rest do
+          [ref_type | remaining] ->
+            {{:ref, ref_type}, remaining}
+
+          _ ->
+            {{:ref, nil}, rest}
+        end
+
+      _ ->
+        # Could be a user-defined type
+        {{:user_type, type}, rest}
+    end
+  end
+
+  defp parse_type_size_spec(tokens) do
+    parse_type_size_spec(tokens, [])
+  end
+
+  defp parse_type_size_spec([")" | rest], acc) do
+    {Enum.reverse(acc) |> Enum.join(","), rest}
+  end
+
+  defp parse_type_size_spec(["," | rest], acc) do
+    parse_type_size_spec(rest, acc)
+  end
+
+  defp parse_type_size_spec([token | rest], acc) do
+    parse_type_size_spec(rest, [token | acc])
+  end
+
+  defp parse_type_size_spec([], acc) do
+    {Enum.reverse(acc) |> Enum.join(","), []}
+  end
+
+  defp parse_type_method(["FUNCTION", name, "(" | rest]) do
+    {params, remaining} = parse_method_params(rest)
+
+    case remaining do
+      ["RETURN", return_type | final] ->
+        {{:member_function, name, params, return_type}, skip_to_next_member(final)}
+
+      _ ->
+        {{:member_function, name, params, nil}, skip_to_next_member(remaining)}
+    end
+  end
+
+  defp parse_type_method(["PROCEDURE", name, "(" | rest]) do
+    {params, remaining} = parse_method_params(rest)
+    {{:member_procedure, name, params}, skip_to_next_member(remaining)}
+  end
+
+  defp parse_type_method(["FUNCTION", name | rest]) do
+    case rest do
+      ["RETURN", return_type | final] ->
+        {{:member_function, name, [], return_type}, skip_to_next_member(final)}
+
+      _ ->
+        {{:member_function, name, [], nil}, skip_to_next_member(rest)}
+    end
+  end
+
+  defp parse_type_method(["PROCEDURE", name | rest]) do
+    {{:member_procedure, name, []}, skip_to_next_member(rest)}
+  end
+
+  defp parse_type_method(rest), do: {nil, rest}
+
+  defp parse_constructor_method(["FUNCTION", name, "(" | rest]) do
+    {params, remaining} = parse_method_params(rest)
+
+    case remaining do
+      ["RETURN", "SELF", "AS", "RESULT" | final] ->
+        {{:constructor, name, params}, skip_to_next_member(final)}
+
+      ["RETURN", return_type | final] ->
+        {{:constructor, name, params, return_type}, skip_to_next_member(final)}
+
+      _ ->
+        {{:constructor, name, params}, skip_to_next_member(remaining)}
+    end
+  end
+
+  defp parse_constructor_method(rest), do: {nil, rest}
+
+  defp parse_static_method(["FUNCTION", name, "(" | rest]) do
+    {params, remaining} = parse_method_params(rest)
+
+    case remaining do
+      ["RETURN", return_type | final] ->
+        {{:static_function, name, params, return_type}, skip_to_next_member(final)}
+
+      _ ->
+        {{:static_function, name, params, nil}, skip_to_next_member(remaining)}
+    end
+  end
+
+  defp parse_static_method(["PROCEDURE", name, "(" | rest]) do
+    {params, remaining} = parse_method_params(rest)
+    {{:static_procedure, name, params}, skip_to_next_member(remaining)}
+  end
+
+  defp parse_static_method(rest), do: {nil, rest}
+
+  defp parse_map_method(["MEMBER", "FUNCTION", name | rest]) do
+    case rest do
+      ["RETURN", return_type | final] ->
+        {{:map_method, name, return_type}, skip_to_next_member(final)}
+
+      _ ->
+        {{:map_method, name, nil}, skip_to_next_member(rest)}
+    end
+  end
+
+  defp parse_map_method(rest), do: {nil, rest}
+
+  defp parse_order_method(["MEMBER", "FUNCTION", name, "(" | rest]) do
+    {params, remaining} = parse_method_params(rest)
+
+    case remaining do
+      ["RETURN", return_type | final] ->
+        {{:order_method, name, params, return_type}, skip_to_next_member(final)}
+
+      _ ->
+        {{:order_method, name, params, nil}, skip_to_next_member(remaining)}
+    end
+  end
+
+  defp parse_order_method(rest), do: {nil, rest}
+
+  defp parse_method_params(tokens) do
+    parse_method_params(tokens, [])
+  end
+
+  defp parse_method_params([")" | rest], acc) do
+    {Enum.reverse(acc), rest}
+  end
+
+  defp parse_method_params(["," | rest], acc) do
+    parse_method_params(rest, acc)
+  end
+
+  defp parse_method_params([name, type | rest], acc) do
+    case String.upcase(name) do
+      kw when kw in ["IN", "OUT", "IN OUT"] ->
+        parse_method_params([type | rest], acc)
+
+      _ ->
+        parse_method_params(rest, [{name, type} | acc])
+    end
+  end
+
+  defp parse_method_params([_ | rest], acc) do
+    parse_method_params(rest, acc)
+  end
+
+  defp parse_method_params([], acc) do
+    {Enum.reverse(acc), []}
+  end
+
+  defp skip_to_next_member(tokens) do
+    # Skip until we find a comma or closing paren
+    case tokens do
+      ["," | rest] -> rest
+      [")" | _] = rest -> rest
+      [_ | rest] -> skip_to_next_member(rest)
+      [] -> []
+    end
+  end
+
+  defp parse_element_type([type | rest]) do
+    {type_info, _} = parse_attribute_type([type | rest])
+    {type_info, rest}
+  end
+
+  defp parse_element_type([]) do
+    {:unknown, []}
+  end
+
+  defp parse_varray_def(tokens) do
+    case tokens do
+      [size, ")", "OF" | rest] ->
+        {element_type, _} = parse_element_type(rest)
+
+        parsed_size =
+          case Integer.parse(size) do
+            {num, _} -> num
+            :error -> 0
+          end
+
+        {parsed_size, element_type}
+
+      _ ->
+        {0, :unknown}
     end
   end
 
@@ -1066,6 +1418,10 @@ defmodule OracleDb.SqlParser do
       ["SEQUENCE", name | _] ->
         {:drop_sequence, %{name: name}}
 
+      ["TYPE", name | rest] ->
+        force = "FORCE" in Enum.map(rest, &String.upcase/1)
+        {:drop_type, %{name: name, force: force}}
+
       _ ->
         {:error, "Unknown DROP command"}
     end
@@ -1075,9 +1431,53 @@ defmodule OracleDb.SqlParser do
   defp parse_alter(tokens) do
     case tl(tokens) do
       ["TABLE" | rest] -> parse_alter_table(rest)
+      ["TYPE" | rest] -> parse_alter_type(rest)
       _ -> {:error, "Unknown ALTER command"}
     end
   end
+
+  defp parse_alter_type([type_name | rest]) do
+    {action, details} = parse_alter_type_action(rest)
+    {:alter_type, %{name: type_name, action: action, details: details}}
+  end
+
+  defp parse_alter_type_action(["ADD" | rest]) do
+    case rest do
+      ["ATTRIBUTE", attr_name, attr_type | remaining] ->
+        {type_info, _} = parse_attribute_type([attr_type | remaining])
+        {:add_attribute, {attr_name, type_info}}
+
+      ["MEMBER" | method_rest] ->
+        {method, _} = parse_type_method(method_rest)
+        {:add_method, method}
+
+      _ ->
+        {:error, nil}
+    end
+  end
+
+  defp parse_alter_type_action(["DROP" | rest]) do
+    case rest do
+      ["ATTRIBUTE", attr_name | _] ->
+        {:drop_attribute, attr_name}
+
+      _ ->
+        {:error, nil}
+    end
+  end
+
+  defp parse_alter_type_action(["MODIFY" | rest]) do
+    case rest do
+      ["ATTRIBUTE", attr_name, attr_type | remaining] ->
+        {type_info, _} = parse_attribute_type([attr_type | remaining])
+        {:modify_attribute, {attr_name, type_info}}
+
+      _ ->
+        {:error, nil}
+    end
+  end
+
+  defp parse_alter_type_action(_), do: {:error, nil}
 
   defp parse_alter_table([table | rest]) do
     {action, details} = parse_alter_action(rest)

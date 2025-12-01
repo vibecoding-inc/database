@@ -156,6 +156,55 @@ defmodule OracleDb.Storage do
   end
 
   @doc """
+  Creates a user-defined type.
+  """
+  @spec create_type(GenServer.server(), String.t(), map()) :: :ok | {:error, String.t()}
+  def create_type(server \\ __MODULE__, name, type_def) do
+    GenServer.call(server, {:create_type, normalize_name(name), type_def})
+  end
+
+  @doc """
+  Drops a user-defined type.
+  """
+  @spec drop_type(GenServer.server(), String.t(), boolean()) :: :ok | {:error, String.t()}
+  def drop_type(server \\ __MODULE__, name, force \\ false) do
+    GenServer.call(server, {:drop_type, normalize_name(name), force})
+  end
+
+  @doc """
+  Alters a user-defined type.
+  """
+  @spec alter_type(GenServer.server(), String.t(), atom(), any()) :: :ok | {:error, String.t()}
+  def alter_type(server \\ __MODULE__, name, action, details) do
+    GenServer.call(server, {:alter_type, normalize_name(name), action, details})
+  end
+
+  @doc """
+  Gets a type definition.
+  """
+  @spec get_type(GenServer.server(), String.t()) :: {:ok, map()} | {:error, String.t()}
+  def get_type(server \\ __MODULE__, name) do
+    GenServer.call(server, {:get_type, normalize_name(name)})
+  end
+
+  @doc """
+  Lists all user-defined types.
+  """
+  @spec list_types(GenServer.server()) :: [String.t()]
+  def list_types(server \\ __MODULE__) do
+    GenServer.call(server, :list_types)
+  end
+
+  @doc """
+  Creates an object instance.
+  """
+  @spec create_object(GenServer.server(), String.t(), map()) ::
+          {:ok, map()} | {:error, String.t()}
+  def create_object(server \\ __MODULE__, type_name, values) do
+    GenServer.call(server, {:create_object, normalize_name(type_name), values})
+  end
+
+  @doc """
   Gets all table names.
   """
   @spec list_tables(GenServer.server()) :: [table_name()]
@@ -180,7 +229,8 @@ defmodule OracleDb.Storage do
       data: %{},
       sequences: %{},
       indexes: %{},
-      row_counter: %{}
+      row_counter: %{},
+      types: %{}
     }
 
     {:ok, state}
@@ -385,16 +435,133 @@ defmodule OracleDb.Storage do
       data: %{},
       sequences: %{},
       indexes: %{},
-      row_counter: %{}
+      row_counter: %{},
+      types: %{}
     }
 
     {:reply, :ok, new_state}
+  end
+
+  # Type management callbacks
+
+  @impl true
+  def handle_call({:create_type, type_name, type_def}, _from, state) do
+    if Map.has_key?(state.types, type_name) and not Map.get(type_def, :replace, false) do
+      {:reply, {:error, "Type #{type_name} already exists"}, state}
+    else
+      new_state = %{state | types: Map.put(state.types, type_name, type_def)}
+      {:reply, :ok, new_state}
+    end
+  end
+
+  @impl true
+  def handle_call({:drop_type, type_name, _force}, _from, state) do
+    if Map.has_key?(state.types, type_name) do
+      new_state = %{state | types: Map.delete(state.types, type_name)}
+      {:reply, :ok, new_state}
+    else
+      {:reply, {:error, "Type #{type_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:alter_type, type_name, action, details}, _from, state) do
+    case Map.fetch(state.types, type_name) do
+      {:ok, type_def} ->
+        case apply_type_alter(type_def, action, details) do
+          {:ok, new_type_def} ->
+            new_state = %{state | types: Map.put(state.types, type_name, new_type_def)}
+            {:reply, :ok, new_state}
+
+          {:error, _} = err ->
+            {:reply, err, state}
+        end
+
+      :error ->
+        {:reply, {:error, "Type #{type_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:get_type, type_name}, _from, state) do
+    case Map.fetch(state.types, type_name) do
+      {:ok, type_def} -> {:reply, {:ok, type_def}, state}
+      :error -> {:reply, {:error, "Type #{type_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:list_types, _from, state) do
+    {:reply, Map.keys(state.types), state}
+  end
+
+  @impl true
+  def handle_call({:create_object, type_name, values}, _from, state) do
+    case Map.fetch(state.types, type_name) do
+      {:ok, type_def} ->
+        object = create_object_instance(type_name, type_def, values)
+        {:reply, {:ok, object}, state}
+
+      :error ->
+        {:reply, {:error, "Type #{type_name} does not exist"}, state}
+    end
   end
 
   # Private functions
 
   defp normalize_name(name) when is_binary(name), do: String.upcase(name)
   defp normalize_name(name), do: name
+
+  defp apply_type_alter(type_def, :add_attribute, {name, type_info}) do
+    new_attrs = type_def.attributes ++ [{name, type_info}]
+    {:ok, %{type_def | attributes: new_attrs}}
+  end
+
+  defp apply_type_alter(type_def, :drop_attribute, attr_name) do
+    new_attrs =
+      Enum.reject(type_def.attributes, fn {name, _} ->
+        String.upcase(to_string(name)) == String.upcase(attr_name)
+      end)
+
+    {:ok, %{type_def | attributes: new_attrs}}
+  end
+
+  defp apply_type_alter(type_def, :modify_attribute, {name, type_info}) do
+    new_attrs =
+      Enum.map(type_def.attributes, fn {attr_name, _} = attr ->
+        if String.upcase(to_string(attr_name)) == String.upcase(name) do
+          {name, type_info}
+        else
+          attr
+        end
+      end)
+
+    {:ok, %{type_def | attributes: new_attrs}}
+  end
+
+  defp apply_type_alter(type_def, :add_method, method) do
+    new_methods = [method | Map.get(type_def, :methods, [])]
+    {:ok, Map.put(type_def, :methods, new_methods)}
+  end
+
+  defp apply_type_alter(_type_def, :error, _) do
+    {:error, "Invalid ALTER TYPE action"}
+  end
+
+  defp create_object_instance(type_name, type_def, values) do
+    # Create an object instance with the given values
+    attrs = Map.get(type_def, :attributes, [])
+
+    object =
+      attrs
+      |> Enum.map(fn {name, _type_info} ->
+        {String.upcase(to_string(name)),
+         Map.get(values, name) || Map.get(values, String.upcase(to_string(name)))}
+      end)
+      |> Enum.into(%{})
+
+    Map.put(object, "__TYPE__", type_name)
+  end
 
   defp apply_alter(schema, :add_column, {name, type, modifiers}) do
     new_columns = schema.columns ++ [{name, type, modifiers}]

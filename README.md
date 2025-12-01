@@ -11,6 +11,15 @@ An in-memory relational database implemented in Elixir that is compatible with O
 - `CREATE INDEX` / `DROP INDEX` - Create and drop indexes
 - `CREATE SEQUENCE` / `DROP SEQUENCE` - Create and drop sequences
 
+### Object-Relational Types
+- `CREATE TYPE ... AS OBJECT` - Create object types with attributes and methods
+- `CREATE TYPE ... AS TABLE OF` - Create nested table types
+- `CREATE TYPE ... AS VARRAY` - Create variable-size array types
+- `CREATE TYPE ... UNDER` - Create subtypes with inheritance
+- `DROP TYPE` - Remove user-defined types
+- `ALTER TYPE` - Add, drop, or modify type attributes
+- Member functions, static methods, and constructors
+
 ### DML (Data Manipulation Language)
 - `SELECT` - Query data with WHERE, ORDER BY, and column projections
 - `INSERT` - Insert rows into tables
@@ -35,6 +44,7 @@ An in-memory relational database implemented in Elixir that is compatible with O
 - `CLOB` / `BLOB`
 - `BOOLEAN`
 - `FLOAT` / `DOUBLE` / `DECIMAL` / `NUMERIC`
+- User-defined object types
 
 ## Installation
 
@@ -94,6 +104,43 @@ exists = OracleDb.table_exists?(db, "users")
 
 # Reset database (clear all data)
 OracleDb.reset(db)
+```
+
+### Object-Relational Types
+
+```elixir
+# Create an object type
+OracleDb.execute(db, """
+  CREATE TYPE address_type AS OBJECT (
+    street VARCHAR2(100),
+    city VARCHAR2(50),
+    zip_code VARCHAR2(10)
+  )
+""")
+
+# Create an object type with methods
+OracleDb.execute(db, """
+  CREATE TYPE person_type AS OBJECT (
+    first_name VARCHAR2(50),
+    last_name VARCHAR2(50),
+    MEMBER FUNCTION get_full_name RETURN VARCHAR2
+  )
+""")
+
+# Create a nested table type
+OracleDb.execute(db, "CREATE TYPE phone_list AS TABLE OF VARCHAR2(20)")
+
+# Create a VARRAY type
+OracleDb.execute(db, "CREATE TYPE color_array AS VARRAY(10) OF VARCHAR2(20)")
+
+# Create a subtype with inheritance
+OracleDb.execute(db, "CREATE TYPE employee_type UNDER person_type (emp_id NUMBER)")
+
+# Alter a type - add attribute
+OracleDb.execute(db, "ALTER TYPE person_type ADD ATTRIBUTE birth_date DATE")
+
+# Drop a type
+OracleDb.execute(db, "DROP TYPE address_type")
 ```
 
 ## Running Tests

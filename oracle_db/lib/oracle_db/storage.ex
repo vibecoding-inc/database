@@ -660,28 +660,57 @@ defmodule OracleDb.Storage do
   defp sort_rows(rows, []), do: rows
 
   defp sort_rows(rows, order_by) do
-    Enum.sort_by(rows, fn row ->
-      Enum.map(order_by, fn {col, dir} ->
-        value = get_column_value(row, col)
-
-        case dir do
-          :asc -> {0, value}
-          :desc -> {1, negate_for_sort(value)}
-        end
-      end)
+    Enum.sort(rows, fn row_a, row_b ->
+      compare_rows_for_sort(row_a, row_b, order_by)
     end)
   end
 
-  defp negate_for_sort(nil), do: nil
-  defp negate_for_sort(val) when is_number(val), do: -val
+  defp compare_rows_for_sort(_row_a, _row_b, []), do: true
 
-  defp negate_for_sort(val) when is_binary(val) do
-    # For descending string sort, we can't easily negate
-    # So we'll use a different approach in sort_rows
-    val
+  defp compare_rows_for_sort(row_a, row_b, [{col, dir} | rest]) do
+    val_a = get_column_value(row_a, col)
+    val_b = get_column_value(row_b, col)
+
+    case compare_values(val_a, val_b, dir) do
+      :eq -> compare_rows_for_sort(row_a, row_b, rest)
+      :lt -> true
+      :gt -> false
+    end
   end
 
-  defp negate_for_sort(val), do: val
+  defp compare_values(nil, nil, _dir), do: :eq
+  defp compare_values(nil, _, :asc), do: :lt
+  defp compare_values(nil, _, :desc), do: :gt
+  defp compare_values(_, nil, :asc), do: :gt
+  defp compare_values(_, nil, :desc), do: :lt
+
+  defp compare_values(a, b, dir) when is_number(a) and is_number(b) do
+    cond do
+      a == b -> :eq
+      (dir == :asc and a < b) or (dir == :desc and a > b) -> :lt
+      true -> :gt
+    end
+  end
+
+  defp compare_values(a, b, dir) when is_binary(a) and is_binary(b) do
+    ua = String.upcase(a)
+    ub = String.upcase(b)
+
+    cond do
+      ua == ub -> :eq
+      (dir == :asc and ua < ub) or (dir == :desc and ua > ub) -> :lt
+      true -> :gt
+    end
+  end
+
+  defp compare_values(a, b, dir) do
+    # Fallback comparison
+    cond do
+      a == b -> :eq
+      (dir == :asc and a < b) or (dir == :desc and a > b) -> :lt
+      true -> :gt
+    end
+  end
 
   defp project_columns(rows, [{:all, "*"}]) do
     Enum.map(rows, fn row ->
@@ -823,7 +852,7 @@ defmodule OracleDb.Storage do
       end
 
     if is_number(value) and is_integer(decimals) do
-      Float.round(value / 1, decimals)
+      Float.round(value * 1.0, decimals)
     else
       value
     end

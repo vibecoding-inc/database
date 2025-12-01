@@ -909,7 +909,313 @@ defmodule OracleDb.Storage do
     if get_column_value(row, col) != nil, do: 1, else: 0
   end
 
+  # XML Functions
+
+  # XMLELEMENT creates an XML element with specified name and content.
+  # Usage: XMLELEMENT(NAME tag_name, content) or XMLELEMENT(NAME tag_name, XMLATTRIBUTES(...), content)
+  defp evaluate_function("XMLELEMENT", args, row, _rownum) do
+    case args do
+      ["NAME", tag_name | rest] ->
+        {attrs, content} = parse_xml_element_args(rest, row)
+        build_xml_element(tag_name, attrs, content)
+
+      [tag_name | rest] ->
+        {attrs, content} = parse_xml_element_args(rest, row)
+        build_xml_element(tag_name, attrs, content)
+
+      _ ->
+        nil
+    end
+  end
+
+  # XMLFOREST creates a forest of XML elements from column values.
+  # Usage: XMLFOREST(col1 AS name1, col2 AS name2, ...)
+  defp evaluate_function("XMLFOREST", args, row, _rownum) do
+    elements =
+      args
+      |> parse_forest_args()
+      |> Enum.map(fn {col, name} ->
+        value = get_column_value(row, col) || parse_token_value(col)
+        safe_name = sanitize_xml_name(name)
+        if value != nil, do: "<#{safe_name}>#{escape_xml(value)}</#{safe_name}>", else: ""
+      end)
+      |> Enum.filter(&(&1 != ""))
+      |> Enum.join("")
+
+    elements
+  end
+
+  # XMLAGG aggregates XML fragments into a single XML document.
+  # Note: In Oracle, XMLAGG is typically used with GROUP BY to aggregate across rows.
+  # In this single-row evaluation context, it returns the column value as-is.
+  # Full aggregate behavior would require query-level aggregation support.
+  defp evaluate_function("XMLAGG", args, row, _rownum) do
+    case args do
+      [col | _] ->
+        value = get_column_value(row, col)
+        if is_binary(value), do: value, else: to_string(value)
+
+      _ ->
+        nil
+    end
+  end
+
+  # XMLROOT adds an XML declaration to an XML document.
+  # Usage: XMLROOT(xml_value, VERSION version_string)
+  defp evaluate_function("XMLROOT", args, row, _rownum) do
+    case args do
+      [xml_col, "VERSION", version | _] ->
+        xml_content = get_column_value(row, xml_col) || parse_token_value(xml_col)
+        version_str = parse_token_value(version)
+        ~s(<?xml version="#{version_str}"?>#{xml_content})
+
+      [xml_col | _] ->
+        xml_content = get_column_value(row, xml_col) || parse_token_value(xml_col)
+        ~s(<?xml version="1.0"?>#{xml_content})
+
+      _ ->
+        nil
+    end
+  end
+
+  # XMLPARSE parses a string as XML content.
+  # Usage: XMLPARSE(CONTENT string_value) or XMLPARSE(DOCUMENT string_value)
+  defp evaluate_function("XMLPARSE", args, row, _rownum) do
+    case args do
+      ["CONTENT", value | _] ->
+        get_column_value(row, value) || parse_token_value(value)
+
+      ["DOCUMENT", value | _] ->
+        content = get_column_value(row, value) || parse_token_value(value)
+        ~s(<?xml version="1.0"?>#{content})
+
+      [value | _] ->
+        get_column_value(row, value) || parse_token_value(value)
+
+      _ ->
+        nil
+    end
+  end
+
+  # XMLSERIALIZE converts XML to a string with optional formatting.
+  # Usage: XMLSERIALIZE(CONTENT xml_value AS datatype)
+  defp evaluate_function("XMLSERIALIZE", args, row, _rownum) do
+    case args do
+      ["CONTENT", value | _] ->
+        result = get_column_value(row, value) || parse_token_value(value)
+        to_string(result)
+
+      ["DOCUMENT", value | _] ->
+        result = get_column_value(row, value) || parse_token_value(value)
+        to_string(result)
+
+      [value | _] ->
+        result = get_column_value(row, value) || parse_token_value(value)
+        to_string(result)
+
+      _ ->
+        nil
+    end
+  end
+
+  # XMLCONCAT concatenates multiple XML fragments.
+  # Usage: XMLCONCAT(xml1, xml2, ...)
+  defp evaluate_function("XMLCONCAT", args, row, _rownum) do
+    args
+    |> Enum.map(fn arg ->
+      value = get_column_value(row, arg) || parse_token_value(arg)
+      if value != nil, do: to_string(value), else: ""
+    end)
+    |> Enum.join("")
+  end
+
+  # XMLCOMMENT creates an XML comment.
+  # Usage: XMLCOMMENT(string_value)
+  defp evaluate_function("XMLCOMMENT", args, row, _rownum) do
+    case args do
+      [value | _] ->
+        content = get_column_value(row, value) || parse_token_value(value)
+        "<!--#{content}-->"
+
+      _ ->
+        nil
+    end
+  end
+
+  # XMLPI creates an XML processing instruction.
+  # Usage: XMLPI(NAME target, string_value)
+  defp evaluate_function("XMLPI", args, row, _rownum) do
+    case args do
+      ["NAME", target, value | _] ->
+        content = get_column_value(row, value) || parse_token_value(value)
+        "<?#{target} #{content}?>"
+
+      ["NAME", target | _] ->
+        "<?#{target}?>"
+
+      [target, value | _] ->
+        content = get_column_value(row, value) || parse_token_value(value)
+        "<?#{target} #{content}?>"
+
+      [target | _] ->
+        "<?#{target}?>"
+
+      _ ->
+        nil
+    end
+  end
+
+  # XMLATTRIBUTES creates attributes for an XML element.
+  # This is typically used within XMLELEMENT.
+  # Usage: XMLATTRIBUTES(col1 AS attr1, col2 AS attr2, ...)
+  defp evaluate_function("XMLATTRIBUTES", args, row, _rownum) do
+    attrs =
+      args
+      |> parse_forest_args()
+      |> Enum.map(fn {col, name} ->
+        value = get_column_value(row, col) || parse_token_value(col)
+        safe_name = sanitize_xml_name(name)
+        if value != nil, do: ~s(#{safe_name}="#{escape_xml_attr(value)}"), else: ""
+      end)
+      |> Enum.filter(&(&1 != ""))
+      |> Enum.join(" ")
+
+    attrs
+  end
+
+  # XMLCDATA creates a CDATA section.
+  # Usage: XMLCDATA(string_value)
+  defp evaluate_function("XMLCDATA", args, row, _rownum) do
+    case args do
+      [value | _] ->
+        content = get_column_value(row, value) || parse_token_value(value)
+        "<![CDATA[#{content}]]>"
+
+      _ ->
+        nil
+    end
+  end
+
   defp evaluate_function(_, _, _, _), do: nil
+
+  # XML Helper Functions
+
+  defp parse_xml_element_args(args, row) do
+    # Look for XMLATTRIBUTES in args
+    case Enum.find_index(args, &(&1 == "XMLATTRIBUTES" or &1 == "(")) do
+      nil ->
+        # No attributes, all args are content
+        content =
+          args
+          |> Enum.map(fn arg ->
+            case arg do
+              {:string, val} -> val
+              _ -> get_column_value(row, arg) || parse_token_value(arg)
+            end
+          end)
+          |> Enum.filter(&(&1 != nil))
+          |> Enum.map(&to_string/1)
+          |> Enum.join("")
+
+        {"", content}
+
+      _ ->
+        # Has nested content, parse it
+        content =
+          args
+          |> Enum.map(fn arg ->
+            case arg do
+              {:string, val} -> val
+              "(" -> nil
+              ")" -> nil
+              "," -> nil
+              _ -> get_column_value(row, arg) || parse_token_value(arg)
+            end
+          end)
+          |> Enum.filter(&(&1 != nil))
+          |> Enum.map(&to_string/1)
+          |> Enum.join("")
+
+        {"", content}
+    end
+  end
+
+  defp build_xml_element(tag_name, "", content) when content == "" or is_nil(content) do
+    safe_tag = sanitize_xml_name(tag_name)
+    "<#{safe_tag}/>"
+  end
+
+  defp build_xml_element(tag_name, "", content) do
+    safe_tag = sanitize_xml_name(tag_name)
+    "<#{safe_tag}>#{escape_xml(content)}</#{safe_tag}>"
+  end
+
+  defp build_xml_element(tag_name, attrs, content) when content == "" or is_nil(content) do
+    safe_tag = sanitize_xml_name(tag_name)
+    "<#{safe_tag} #{attrs}/>"
+  end
+
+  defp build_xml_element(tag_name, attrs, content) do
+    safe_tag = sanitize_xml_name(tag_name)
+    "<#{safe_tag} #{attrs}>#{escape_xml(content)}</#{safe_tag}>"
+  end
+
+  # Sanitize XML element/attribute names to prevent injection
+  # XML names must start with a letter or underscore and can only contain
+  # letters, digits, hyphens, underscores, and periods
+  defp sanitize_xml_name(name) when is_binary(name) do
+    name
+    |> String.replace(~r/[^a-zA-Z0-9_\-\.]/, "_")
+    |> ensure_valid_xml_start()
+  end
+
+  defp sanitize_xml_name(name), do: sanitize_xml_name(to_string(name))
+
+  defp ensure_valid_xml_start(name) do
+    if String.match?(name, ~r/^[a-zA-Z_]/) do
+      name
+    else
+      "_" <> name
+    end
+  end
+
+  defp parse_forest_args(args) do
+    # Parse col AS name pairs from args
+    parse_forest_args(args, [])
+  end
+
+  defp parse_forest_args([], acc), do: Enum.reverse(acc)
+
+  defp parse_forest_args([col, "AS", name | rest], acc) do
+    parse_forest_args(rest, [{col, name} | acc])
+  end
+
+  defp parse_forest_args(["," | rest], acc) do
+    parse_forest_args(rest, acc)
+  end
+
+  defp parse_forest_args([col | rest], acc) do
+    # No AS clause, use column name as element name
+    parse_forest_args(rest, [{col, col} | acc])
+  end
+
+  defp escape_xml(value) when is_binary(value) do
+    value
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+  end
+
+  defp escape_xml(value), do: to_string(value)
+
+  defp escape_xml_attr(value) when is_binary(value) do
+    value
+    |> escape_xml()
+    |> String.replace("\"", "&quot;")
+    |> String.replace("'", "&apos;")
+  end
+
+  defp escape_xml_attr(value), do: escape_xml(to_string(value))
 
   defp apply_update(rows, sets, where) do
     {updated, count} =

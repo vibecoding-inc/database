@@ -190,7 +190,19 @@ defmodule OracleDb.SqlParser do
       "ROUND",
       "TRUNC",
       "SYSDATE",
-      "ROWNUM"
+      "ROWNUM",
+      # XML functions
+      "XMLELEMENT",
+      "XMLFOREST",
+      "XMLAGG",
+      "XMLROOT",
+      "XMLPARSE",
+      "XMLSERIALIZE",
+      "XMLCONCAT",
+      "XMLCOMMENT",
+      "XMLPI",
+      "XMLATTRIBUTES",
+      "XMLCDATA"
     ]
   end
 

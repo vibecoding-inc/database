@@ -26,6 +26,7 @@ An in-memory relational database implemented in Elixir that is compatible with O
 - String functions: `UPPER`, `LOWER`, `SUBSTR`, `LENGTH`, `TRIM`, `LTRIM`, `RTRIM`
 - Numeric functions: `ROUND`, `TRUNC`
 - Type conversion: `TO_CHAR`, `TO_NUMBER`, `TO_DATE`
+- XML functions: `XMLELEMENT`, `XMLFOREST`, `XMLAGG`, `XMLROOT`, `XMLPARSE`, `XMLSERIALIZE`, `XMLCONCAT`, `XMLCOMMENT`, `XMLPI`, `XMLATTRIBUTES`, `XMLCDATA`
 
 ### Supported Column Types
 - `NUMBER` / `INTEGER` / `INT`

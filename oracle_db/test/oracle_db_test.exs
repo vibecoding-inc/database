@@ -229,6 +229,91 @@ defmodule OracleDbTest do
     end
   end
 
+  describe "XML functions" do
+    setup %{db: db} do
+      OracleDb.execute(
+        db,
+        "CREATE TABLE xml_test (id NUMBER, name VARCHAR2(50), value VARCHAR2(100))"
+      )
+
+      OracleDb.execute(db, "INSERT INTO xml_test VALUES (1, 'product', 'Widget')")
+      OracleDb.execute(db, "INSERT INTO xml_test VALUES (2, 'category', 'Electronics')")
+      :ok
+    end
+
+    test "XMLELEMENT creates XML element", %{db: db} do
+      {:ok, rows} =
+        OracleDb.execute(db, "SELECT XMLELEMENT(NAME item, name) FROM xml_test WHERE id = 1")
+
+      assert length(rows) == 1
+      # Check that we get an XML-like string
+      row = hd(rows)
+      assert Map.values(row) |> Enum.any?(&(is_binary(&1) and String.contains?(&1, "<item>")))
+    end
+
+    test "XMLFOREST creates multiple elements", %{db: db} do
+      {:ok, rows} =
+        OracleDb.execute(db, "SELECT XMLFOREST(name, value) FROM xml_test WHERE id = 1")
+
+      assert length(rows) == 1
+      row = hd(rows)
+      xml_output = Map.values(row) |> List.first()
+      assert is_binary(xml_output)
+      assert String.contains?(xml_output, "<name>")
+      assert String.contains?(xml_output, "<value>")
+    end
+
+    test "XMLCOMMENT creates XML comment", %{db: db} do
+      {:ok, rows} = OracleDb.execute(db, "SELECT XMLCOMMENT(name) FROM xml_test WHERE id = 1")
+      assert length(rows) == 1
+      row = hd(rows)
+      xml_output = Map.values(row) |> List.first()
+      assert is_binary(xml_output)
+      assert String.contains?(xml_output, "<!--")
+      assert String.contains?(xml_output, "-->")
+    end
+
+    test "XMLCDATA creates CDATA section", %{db: db} do
+      {:ok, rows} = OracleDb.execute(db, "SELECT XMLCDATA(value) FROM xml_test WHERE id = 1")
+      assert length(rows) == 1
+      row = hd(rows)
+      xml_output = Map.values(row) |> List.first()
+      assert is_binary(xml_output)
+      assert String.contains?(xml_output, "<![CDATA[")
+      assert String.contains?(xml_output, "]]>")
+    end
+
+    test "XMLCONCAT concatenates XML fragments", %{db: db} do
+      {:ok, rows} =
+        OracleDb.execute(db, "SELECT XMLCONCAT(name, value) FROM xml_test WHERE id = 1")
+
+      assert length(rows) == 1
+      row = hd(rows)
+      xml_output = Map.values(row) |> List.first()
+      assert is_binary(xml_output)
+      assert String.contains?(xml_output, "product")
+      assert String.contains?(xml_output, "Widget")
+    end
+
+    test "XMLROOT adds XML declaration", %{db: db} do
+      {:ok, rows} = OracleDb.execute(db, "SELECT XMLROOT(name) FROM xml_test WHERE id = 1")
+      assert length(rows) == 1
+      row = hd(rows)
+      xml_output = Map.values(row) |> List.first()
+      assert is_binary(xml_output)
+      assert String.contains?(xml_output, "<?xml version=")
+    end
+
+    test "XMLPI creates processing instruction", %{db: db} do
+      {:ok, rows} = OracleDb.execute(db, "SELECT XMLPI(NAME stylesheet) FROM DUAL")
+      assert length(rows) == 1
+      row = hd(rows)
+      xml_output = Map.values(row) |> List.first()
+      assert is_binary(xml_output)
+      assert String.contains?(xml_output, "<?stylesheet")
+    end
+  end
+
   describe "UPDATE operations" do
     setup %{db: db} do
       OracleDb.execute(

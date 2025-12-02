@@ -441,6 +441,30 @@ defmodule OracleDb.Storage do
     GenServer.call(server, :reset)
   end
 
+  @doc """
+  Gets the current database state for persistence.
+  """
+  @spec get_state(GenServer.server()) :: map()
+  def get_state(server \\ __MODULE__) do
+    GenServer.call(server, :get_state)
+  end
+
+  @doc """
+  Sets the database state from persistence.
+  """
+  @spec set_state(GenServer.server(), map()) :: :ok
+  def set_state(server \\ __MODULE__, state) do
+    GenServer.call(server, {:set_state, state})
+  end
+
+  @doc """
+  Lists all sequences.
+  """
+  @spec list_sequences(GenServer.server()) :: [String.t()]
+  def list_sequences(server \\ __MODULE__) do
+    GenServer.call(server, :list_sequences)
+  end
+
   # Server callbacks
 
   @impl true
@@ -665,10 +689,29 @@ defmodule OracleDb.Storage do
       row_counter: %{},
       types: %{},
       views: %{},
-      materialized_views: %{}
+      materialized_views: %{},
+      procedures: %{},
+      functions: %{},
+      packages: %{},
+      triggers: %{}
     }
 
     {:reply, :ok, new_state}
+  end
+
+  @impl true
+  def handle_call(:get_state, _from, state) do
+    {:reply, state, state}
+  end
+
+  @impl true
+  def handle_call({:set_state, new_state}, _from, _state) do
+    {:reply, :ok, new_state}
+  end
+
+  @impl true
+  def handle_call(:list_sequences, _from, state) do
+    {:reply, Map.keys(state.sequences), state}
   end
 
   # Type management callbacks

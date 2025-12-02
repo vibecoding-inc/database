@@ -187,6 +187,112 @@ defmodule OracleDb do
     GenServer.call(server, :list_views)
   end
 
+  @doc """
+  Lists all sequences in the database.
+
+  ## Examples
+
+      sequences = OracleDb.list_sequences(db)
+
+  """
+  @spec list_sequences(server()) :: [String.t()]
+  def list_sequences(server) do
+    GenServer.call(server, :list_sequences)
+  end
+
+  @doc """
+  Lists all stored procedures in the database.
+
+  ## Examples
+
+      procedures = OracleDb.list_procedures(db)
+
+  """
+  @spec list_procedures(server()) :: [String.t()]
+  def list_procedures(server) do
+    GenServer.call(server, :list_procedures)
+  end
+
+  @doc """
+  Lists all stored functions in the database.
+
+  ## Examples
+
+      functions = OracleDb.list_functions(db)
+
+  """
+  @spec list_functions(server()) :: [String.t()]
+  def list_functions(server) do
+    GenServer.call(server, :list_functions)
+  end
+
+  @doc """
+  Lists all packages in the database.
+
+  ## Examples
+
+      packages = OracleDb.list_packages(db)
+
+  """
+  @spec list_packages(server()) :: [String.t()]
+  def list_packages(server) do
+    GenServer.call(server, :list_packages)
+  end
+
+  @doc """
+  Lists all triggers in the database.
+
+  ## Examples
+
+      triggers = OracleDb.list_triggers(db)
+
+  """
+  @spec list_triggers(server()) :: [String.t()]
+  def list_triggers(server) do
+    GenServer.call(server, :list_triggers)
+  end
+
+  @doc """
+  Saves the database state to an XML file.
+
+  ## Examples
+
+      :ok = OracleDb.save(db)
+      :ok = OracleDb.save(db, "mydb.xml")
+
+  """
+  @spec save(server(), String.t()) :: :ok | {:error, String.t()}
+  def save(server, filename \\ OracleDb.XmlStorage.default_filename()) do
+    GenServer.call(server, {:save, filename})
+  end
+
+  @doc """
+  Loads the database state from an XML file.
+
+  ## Examples
+
+      :ok = OracleDb.load(db)
+      :ok = OracleDb.load(db, "mydb.xml")
+
+  """
+  @spec load(server(), String.t()) :: :ok | {:error, String.t()}
+  def load(server, filename \\ OracleDb.XmlStorage.default_filename()) do
+    GenServer.call(server, {:load, filename})
+  end
+
+  @doc """
+  Gets the database status information.
+
+  ## Examples
+
+      status = OracleDb.status(db)
+
+  """
+  @spec status(server()) :: map()
+  def status(server) do
+    GenServer.call(server, :status)
+  end
+
   # Server Callbacks
 
   @impl true
@@ -254,5 +360,78 @@ defmodule OracleDb do
   def handle_call(:list_views, _from, state) do
     views = Storage.list_views(state.storage)
     {:reply, views, state}
+  end
+
+  @impl true
+  def handle_call(:list_sequences, _from, state) do
+    sequences = Storage.list_sequences(state.storage)
+    {:reply, sequences, state}
+  end
+
+  @impl true
+  def handle_call(:list_procedures, _from, state) do
+    procedures = Storage.list_procedures(state.storage)
+    {:reply, procedures, state}
+  end
+
+  @impl true
+  def handle_call(:list_functions, _from, state) do
+    functions = Storage.list_functions(state.storage)
+    {:reply, functions, state}
+  end
+
+  @impl true
+  def handle_call(:list_packages, _from, state) do
+    packages = Storage.list_packages(state.storage)
+    {:reply, packages, state}
+  end
+
+  @impl true
+  def handle_call(:list_triggers, _from, state) do
+    triggers = Storage.list_triggers(state.storage)
+    {:reply, triggers, state}
+  end
+
+  @impl true
+  def handle_call({:save, filename}, _from, state) do
+    db_state = Storage.get_state(state.storage)
+    result = OracleDb.XmlStorage.save(db_state, filename)
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:load, filename}, _from, state) do
+    case OracleDb.XmlStorage.load(filename) do
+      {:ok, new_db_state} ->
+        Storage.set_state(state.storage, new_db_state)
+        {:reply, :ok, state}
+
+      {:error, _} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:status, _from, state) do
+    db_state = Storage.get_state(state.storage)
+
+    status = %{
+      tables: length(Map.keys(db_state.tables)),
+      sequences: length(Map.keys(db_state.sequences)),
+      indexes: length(Map.keys(db_state.indexes)),
+      types: length(Map.keys(db_state.types)),
+      views: length(Map.keys(db_state.views)),
+      materialized_views: length(Map.keys(db_state.materialized_views)),
+      procedures: length(Map.keys(db_state.procedures)),
+      functions: length(Map.keys(db_state.functions)),
+      packages: length(Map.keys(db_state.packages)),
+      triggers: length(Map.keys(db_state.triggers)),
+      total_rows:
+        db_state.data
+        |> Enum.map(fn {_, rows} -> length(rows) end)
+        |> Enum.sum()
+    }
+
+    {:reply, status, state}
   end
 end

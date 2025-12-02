@@ -482,6 +482,16 @@ defmodule OracleDb.QueryExecutor do
     end
   end
 
+  # SET statement handler
+  def execute_parsed(_storage, {:set, info}) do
+    var_name = String.upcase(to_string(info.variable))
+    value = info.value
+
+    # For now, just acknowledge the SET command
+    # In a full implementation, this would store session variables
+    {:ok, %{message: "Variable #{var_name} set to #{inspect(value)}"}}
+  end
+
   def execute_parsed(_storage, {:error, _} = error) do
     error
   end
@@ -495,9 +505,13 @@ defmodule OracleDb.QueryExecutor do
     Enum.map(args, fn
       {:literal, value} -> value
       # Identifiers would need context to resolve
-      {:identifier, _name} -> nil
+      {:identifier, name} ->
+        IO.puts("[DEBUG query_executor.ex:resolve_call_arguments] Unable to resolve identifier: #{inspect(name)}")
+        nil
       # Bind variables would need context to resolve
-      {:bind_var, _name} -> nil
+      {:bind_var, name} ->
+        IO.puts("[DEBUG query_executor.ex:resolve_call_arguments] Unable to resolve bind variable: #{inspect(name)}")
+        nil
       other -> other
     end)
   end

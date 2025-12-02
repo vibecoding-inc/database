@@ -178,7 +178,10 @@ defmodule OracleDb.PlsqlInterpreter do
     {:ok, declaration_stmts ++ executable_stmts}
   end
 
-  defp parse_plsql_body(_), do: {:ok, []}
+  defp parse_plsql_body(body) do
+    IO.puts("[DEBUG plsql_interpreter.ex:parse_plsql_body] Unable to parse PL/SQL body: #{inspect(body)}")
+    {:ok, []}
+  end
 
   # Extract DECLARE and BEGIN sections
   defp extract_sections(body) do
@@ -431,7 +434,10 @@ defmodule OracleDb.PlsqlInterpreter do
     end
   end
 
-  defp parse_statement(_), do: nil
+  defp parse_statement(stmt) do
+    IO.puts("[DEBUG plsql_interpreter.ex:parse_statement] Unable to parse statement: #{inspect(stmt)}")
+    nil
+  end
 
   # Parse assignment statement: var := expression
   defp parse_assignment(stmt) do
@@ -1170,7 +1176,10 @@ defmodule OracleDb.PlsqlInterpreter do
 
   defp evaluate_function("SYSDATE", _, _context), do: Date.utc_today()
 
-  defp evaluate_function(_func_name, _args, _context), do: nil
+  defp evaluate_function(func_name, args, _context) do
+    IO.puts("[DEBUG plsql_interpreter.ex:evaluate_function] Unhandled function: #{inspect(func_name)} with args: #{inspect(args)}")
+    nil
+  end
 
   # Evaluate condition
   defp evaluate_condition({:comparison, op, left, right}, context) do

@@ -246,7 +246,26 @@ defmodule OracleDb.SqlParser do
       "EXEC" -> parse_execute(tokens)
       "BEGIN" -> parse_anonymous_block(tokens)
       "DECLARE" -> parse_anonymous_block(tokens)
+      "SET" -> parse_set(tokens)
       _ -> {:error, "Unknown SQL command: #{hd(tokens)}"}
+    end
+  end
+
+  # Parse SET statement for session variables (e.g., SET DBMS_OUTPUT = 'ON')
+  defp parse_set(tokens) do
+    case tl(tokens) do
+      [var_name, "=", value | _] ->
+        {:set,
+         %{
+           variable: var_name,
+           value: parse_value(value)
+         }}
+
+      [var_name | _] ->
+        {:set, %{variable: var_name, value: nil}}
+
+      [] ->
+        {:error, "Invalid SET syntax: missing variable name"}
     end
   end
 
@@ -451,12 +470,209 @@ defmodule OracleDb.SqlParser do
       {_before, rest} ->
         case rest do
           [table | remaining] ->
-            {normalize_token(table), remaining}
+            # Check for JOIN clauses
+            {joins, final_rest} = parse_joins(remaining)
+
+            if Enum.empty?(joins) do
+              {normalize_token(table), final_rest}
+            else
+              {{:join, normalize_token(table), joins}, final_rest}
+            end
 
           [] ->
             {nil, []}
         end
     end
+  end
+
+  # Parse JOIN clauses
+  defp parse_joins(tokens) do
+    parse_joins(tokens, [])
+  end
+
+  defp parse_joins([], acc) do
+    {Enum.reverse(acc), []}
+  end
+
+  defp parse_joins([token | rest], acc) when is_binary(token) do
+    case String.upcase(token) do
+      # Standard JOIN (or INNER JOIN)
+      "JOIN" ->
+        {join_info, remaining} = parse_single_join(rest, :inner)
+        parse_joins(remaining, [join_info | acc])
+
+      "INNER" ->
+        case rest do
+          ["JOIN" | join_rest] ->
+            {join_info, remaining} = parse_single_join(join_rest, :inner)
+            parse_joins(remaining, [join_info | acc])
+
+          _ ->
+            {Enum.reverse(acc), [token | rest]}
+        end
+
+      "LEFT" ->
+        case rest do
+          ["OUTER", "JOIN" | join_rest] ->
+            {join_info, remaining} = parse_single_join(join_rest, :left_outer)
+            parse_joins(remaining, [join_info | acc])
+
+          ["JOIN" | join_rest] ->
+            {join_info, remaining} = parse_single_join(join_rest, :left_outer)
+            parse_joins(remaining, [join_info | acc])
+
+          _ ->
+            {Enum.reverse(acc), [token | rest]}
+        end
+
+      "RIGHT" ->
+        case rest do
+          ["OUTER", "JOIN" | join_rest] ->
+            {join_info, remaining} = parse_single_join(join_rest, :right_outer)
+            parse_joins(remaining, [join_info | acc])
+
+          ["JOIN" | join_rest] ->
+            {join_info, remaining} = parse_single_join(join_rest, :right_outer)
+            parse_joins(remaining, [join_info | acc])
+
+          _ ->
+            {Enum.reverse(acc), [token | rest]}
+        end
+
+      "FULL" ->
+        case rest do
+          ["OUTER", "JOIN" | join_rest] ->
+            {join_info, remaining} = parse_single_join(join_rest, :full_outer)
+            parse_joins(remaining, [join_info | acc])
+
+          ["JOIN" | join_rest] ->
+            {join_info, remaining} = parse_single_join(join_rest, :full_outer)
+            parse_joins(remaining, [join_info | acc])
+
+          _ ->
+            {Enum.reverse(acc), [token | rest]}
+        end
+
+      "CROSS" ->
+        case rest do
+          ["JOIN" | join_rest] ->
+            {join_info, remaining} = parse_single_join(join_rest, :cross)
+            parse_joins(remaining, [join_info | acc])
+
+          _ ->
+            {Enum.reverse(acc), [token | rest]}
+        end
+
+      _ ->
+        # Not a join keyword, stop parsing
+        {Enum.reverse(acc), [token | rest]}
+    end
+  end
+
+  defp parse_joins(tokens, acc) do
+    {Enum.reverse(acc), tokens}
+  end
+
+  # Parse a single JOIN clause: table_name ON condition
+  defp parse_single_join([table | rest], join_type) do
+    # Parse the ON condition or USING clause
+    {condition, remaining} = parse_join_condition(rest)
+
+    join_info = %{
+      type: join_type,
+      table: normalize_token(table),
+      condition: condition
+    }
+
+    {join_info, remaining}
+  end
+
+  defp parse_single_join([], join_type) do
+    {%{type: join_type, table: nil, condition: nil}, []}
+  end
+
+  # Parse the ON condition of a JOIN
+  defp parse_join_condition([]) do
+    {nil, []}
+  end
+
+  defp parse_join_condition([token | rest]) when is_binary(token) do
+    case String.upcase(token) do
+      "ON" ->
+        # Parse the join condition - collect until we hit WHERE, ORDER, GROUP, another JOIN, or end
+        {condition_tokens, remaining} = collect_join_condition(rest, [])
+        {parse_join_condition_tokens(condition_tokens), remaining}
+
+      "USING" ->
+        # Parse USING (col1, col2, ...)
+        case rest do
+          ["(" | using_rest] ->
+            {cols, remaining} = parse_using_columns(using_rest)
+            {{:using, cols}, remaining}
+
+          _ ->
+            {nil, [token | rest]}
+        end
+
+      _ ->
+        # No ON or USING clause (like CROSS JOIN)
+        {nil, [token | rest]}
+    end
+  end
+
+  defp parse_join_condition(tokens) do
+    {nil, tokens}
+  end
+
+  # Collect tokens until we hit a keyword that ends the join condition
+  defp collect_join_condition([], acc) do
+    {Enum.reverse(acc), []}
+  end
+
+  defp collect_join_condition([token | rest], acc) when is_binary(token) do
+    case String.upcase(token) do
+      kw when kw in ["WHERE", "ORDER", "GROUP", "HAVING", "UNION", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "LIMIT"] ->
+        {Enum.reverse(acc), [token | rest]}
+
+      _ ->
+        collect_join_condition(rest, [token | acc])
+    end
+  end
+
+  defp collect_join_condition([token | rest], acc) do
+    collect_join_condition(rest, [token | acc])
+  end
+
+  # Parse the join condition tokens into a structured condition
+  defp parse_join_condition_tokens([]) do
+    nil
+  end
+
+  defp parse_join_condition_tokens(tokens) do
+    # Simple parsing: assume col1 = col2 format
+    {condition, _} = parse_conditions(tokens)
+    condition
+  end
+
+  # Parse USING (col1, col2, ...) columns
+  defp parse_using_columns(tokens) do
+    parse_using_columns(tokens, [])
+  end
+
+  defp parse_using_columns([")" | rest], acc) do
+    {Enum.reverse(acc), rest}
+  end
+
+  defp parse_using_columns(["," | rest], acc) do
+    parse_using_columns(rest, acc)
+  end
+
+  defp parse_using_columns([col | rest], acc) do
+    parse_using_columns(rest, [col | acc])
+  end
+
+  defp parse_using_columns([], acc) do
+    {Enum.reverse(acc), []}
   end
 
   defp parse_where(tokens) do
@@ -727,19 +943,46 @@ defmodule OracleDb.SqlParser do
   end
 
   defp parse_insert_into([table | rest]) do
-    {columns, rest} = parse_insert_columns(rest)
-    {values, _rest} = parse_insert_values(rest)
+    case parse_insert_columns(rest) do
+      {:error, _} = err ->
+        err
 
-    {:insert,
-     %{
-       table: table,
-       columns: columns,
-       values: values
-     }}
+      {columns, rest} ->
+        # Validate that we have VALUES keyword (not VALUE or missing)
+        case rest do
+          [keyword | _] when is_binary(keyword) ->
+            case String.upcase(keyword) do
+              "VALUES" ->
+                {values, _rest} = parse_insert_values(rest)
+
+                {:insert,
+                 %{
+                   table: table,
+                   columns: columns,
+                   values: values
+                 }}
+
+              "VALUE" ->
+                {:error, "Invalid INSERT syntax: use VALUES instead of VALUE"}
+
+              _ ->
+                {:error, "Invalid INSERT syntax: expected VALUES keyword"}
+            end
+
+          [] ->
+            {:error, "Invalid INSERT syntax: missing VALUES clause"}
+
+          _ ->
+            {:error, "Invalid INSERT syntax: expected VALUES keyword"}
+        end
+    end
   end
 
   defp parse_insert_columns(["(" | rest]) do
-    parse_insert_columns(rest, [])
+    case parse_insert_columns(rest, []) do
+      {:error, _} = err -> err
+      {columns, remaining} -> validate_column_names(columns, remaining)
+    end
   end
 
   defp parse_insert_columns(rest) do
@@ -756,6 +999,26 @@ defmodule OracleDb.SqlParser do
 
   defp parse_insert_columns([col | rest], acc) do
     parse_insert_columns(rest, [col | acc])
+  end
+
+  # Validate that column names are valid identifiers, not values
+  defp validate_column_names(columns, rest) do
+    invalid_cols =
+      Enum.filter(columns, fn col ->
+        case col do
+          # String literals are not valid column names
+          {:string, _} -> true
+          # Check if it looks like a number (integer or decimal)
+          col when is_binary(col) -> String.match?(col, ~r/^\d+(\.\d+)?$/)
+          _ -> false
+        end
+      end)
+
+    if Enum.empty?(invalid_cols) do
+      {columns, rest}
+    else
+      {:error, "Invalid INSERT syntax: column names cannot be numeric values or string literals"}
+    end
   end
 
   defp parse_insert_values(tokens) do
@@ -2345,7 +2608,10 @@ defmodule OracleDb.SqlParser do
     end
   end
 
-  defp parse_alter_type_action(_), do: {:error, nil}
+  defp parse_alter_type_action(tokens) do
+    IO.puts("[DEBUG sql_parser.ex:parse_alter_type_action] Unhandled ALTER TYPE action tokens: #{inspect(tokens)}")
+    {:error, nil}
+  end
 
   defp parse_alter_table([table | rest]) do
     {action, details} = parse_alter_action(rest)
@@ -2409,7 +2675,10 @@ defmodule OracleDb.SqlParser do
     end
   end
 
-  defp parse_alter_action(_), do: {:error, nil}
+  defp parse_alter_action(tokens) do
+    IO.puts("[DEBUG sql_parser.ex:parse_alter_action] Unhandled ALTER TABLE action tokens: #{inspect(tokens)}")
+    {:error, nil}
+  end
 
   # Helper function to find a keyword in tokens
   defp find_keyword(tokens, keyword) do

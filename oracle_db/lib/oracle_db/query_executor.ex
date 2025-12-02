@@ -259,6 +259,159 @@ defmodule OracleDb.QueryExecutor do
     end
   end
 
+  # Stored Procedures
+
+  def execute_parsed(storage, {:create_procedure, info}) do
+    proc_name = String.upcase(info.name)
+
+    case Storage.create_procedure(storage, info.name, info) do
+      :ok -> {:ok, %{message: "Procedure #{proc_name} created"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:drop_procedure, info}) do
+    proc_name = String.upcase(info.name)
+
+    case Storage.drop_procedure(storage, info.name) do
+      :ok -> {:ok, %{message: "Procedure #{proc_name} dropped"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:alter_procedure, info}) do
+    proc_name = String.upcase(info.name)
+
+    case Storage.get_procedure(storage, info.name) do
+      {:ok, _} -> {:ok, %{message: "Procedure #{proc_name} compiled"}}
+      {:error, _} = error -> error
+    end
+  end
+
+  # Stored Functions
+
+  def execute_parsed(storage, {:create_function, info}) do
+    func_name = String.upcase(info.name)
+
+    case Storage.create_function(storage, info.name, info) do
+      :ok -> {:ok, %{message: "Function #{func_name} created"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:drop_function, info}) do
+    func_name = String.upcase(info.name)
+
+    case Storage.drop_function(storage, info.name) do
+      :ok -> {:ok, %{message: "Function #{func_name} dropped"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:alter_function, info}) do
+    func_name = String.upcase(info.name)
+
+    case Storage.get_function(storage, info.name) do
+      {:ok, _} -> {:ok, %{message: "Function #{func_name} compiled"}}
+      {:error, _} = error -> error
+    end
+  end
+
+  # Packages
+
+  def execute_parsed(storage, {:create_package, info}) do
+    pkg_name = String.upcase(info.name)
+
+    case Storage.create_package(storage, info.name, info) do
+      :ok -> {:ok, %{message: "Package #{pkg_name} created"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:create_package_body, info}) do
+    pkg_name = String.upcase(info.name)
+
+    case Storage.create_package_body(storage, info.name, info) do
+      :ok -> {:ok, %{message: "Package body #{pkg_name} created"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:drop_package, info}) do
+    pkg_name = String.upcase(info.name)
+
+    case Storage.drop_package(storage, info.name, false) do
+      :ok -> {:ok, %{message: "Package #{pkg_name} dropped"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:drop_package_body, info}) do
+    pkg_name = String.upcase(info.name)
+
+    case Storage.drop_package(storage, info.name, true) do
+      :ok -> {:ok, %{message: "Package body #{pkg_name} dropped"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:alter_package, info}) do
+    pkg_name = String.upcase(info.name)
+
+    case Storage.get_package(storage, info.name) do
+      {:ok, _} ->
+        action_msg = if info.action == :compile_body, do: "body compiled", else: "compiled"
+        {:ok, %{message: "Package #{pkg_name} #{action_msg}"}}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # Triggers
+
+  def execute_parsed(storage, {:create_trigger, info}) do
+    trigger_name = String.upcase(info.name)
+
+    case Storage.create_trigger(storage, info.name, info) do
+      :ok -> {:ok, %{message: "Trigger #{trigger_name} created"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:drop_trigger, info}) do
+    trigger_name = String.upcase(info.name)
+
+    case Storage.drop_trigger(storage, info.name) do
+      :ok -> {:ok, %{message: "Trigger #{trigger_name} dropped"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:alter_trigger, info}) do
+    trigger_name = String.upcase(info.name)
+
+    case info.action do
+      :enable ->
+        case Storage.enable_trigger(storage, info.name) do
+          :ok -> {:ok, %{message: "Trigger #{trigger_name} enabled"}}
+          error -> error
+        end
+
+      :disable ->
+        case Storage.disable_trigger(storage, info.name) do
+          :ok -> {:ok, %{message: "Trigger #{trigger_name} disabled"}}
+          error -> error
+        end
+
+      :compile ->
+        case Storage.get_trigger(storage, info.name) do
+          {:ok, _} -> {:ok, %{message: "Trigger #{trigger_name} compiled"}}
+          {:error, _} = error -> error
+        end
+    end
+  end
+
   def execute_parsed(_storage, {:error, _} = error) do
     error
   end

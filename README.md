@@ -30,6 +30,29 @@ An in-memory relational database implemented in Elixir that is compatible with O
 - `CREATE MATERIALIZED VIEW` - Create materialized views
 - `DROP MATERIALIZED VIEW` - Remove materialized views
 
+### PL/SQL Stored Procedures and Functions
+- `CREATE PROCEDURE` / `CREATE OR REPLACE PROCEDURE` - Create stored procedures
+- `DROP PROCEDURE` - Remove stored procedures
+- `CREATE FUNCTION` / `CREATE OR REPLACE FUNCTION` - Create stored functions
+- `DROP FUNCTION` - Remove stored functions
+- Support for IN, OUT, and IN OUT parameters
+
+### PL/SQL Packages
+- `CREATE PACKAGE` / `CREATE OR REPLACE PACKAGE` - Create package specifications
+- `CREATE PACKAGE BODY` / `CREATE OR REPLACE PACKAGE BODY` - Create package bodies
+- `DROP PACKAGE` / `DROP PACKAGE BODY` - Remove packages or package bodies
+- Package procedures and functions
+
+### Triggers
+- `CREATE TRIGGER` / `CREATE OR REPLACE TRIGGER` - Create database triggers
+- `DROP TRIGGER` - Remove triggers
+- `ALTER TRIGGER ... ENABLE/DISABLE` - Enable or disable triggers
+- BEFORE/AFTER/INSTEAD OF triggers
+- Row-level and statement-level triggers
+- Support for INSERT, UPDATE, DELETE events
+- UPDATE OF column triggers
+- WHEN clause conditions
+
 ### DML (Data Manipulation Language)
 - `SELECT` - Query data with WHERE, ORDER BY, and column projections
 - `INSERT` - Insert rows into tables
@@ -216,6 +239,195 @@ OracleDb.execute(db, """
   CREATE OR REPLACE VIEW employee_view OF employee_view_t AS
   SELECT employee_id, employee_name, employee_email FROM employees WHERE active = 1
 """)
+```
+
+### Stored Procedures
+
+```elixir
+# Create a simple stored procedure
+OracleDb.execute(db, """
+  CREATE PROCEDURE hello_proc (p_name IN VARCHAR2)
+  IS
+  BEGIN
+    DBMS_OUTPUT.PUT_LINE('Hello ' || p_name);
+  END;
+""")
+
+# Create a procedure with OUT parameter
+OracleDb.execute(db, """
+  CREATE PROCEDURE get_user (p_id IN NUMBER, p_name OUT VARCHAR2)
+  IS
+  BEGIN
+    SELECT name INTO p_name FROM users WHERE id = p_id;
+  END;
+""")
+
+# Create a procedure with IN OUT parameter
+OracleDb.execute(db, """
+  CREATE PROCEDURE increment_value (p_value IN OUT NUMBER)
+  IS
+  BEGIN
+    p_value := p_value + 1;
+  END;
+""")
+
+# Replace an existing procedure
+OracleDb.execute(db, """
+  CREATE OR REPLACE PROCEDURE hello_proc (p_name IN VARCHAR2, p_greeting OUT VARCHAR2)
+  IS
+  BEGIN
+    p_greeting := 'Hello ' || p_name;
+  END;
+""")
+
+# Drop a procedure
+OracleDb.execute(db, "DROP PROCEDURE hello_proc")
+```
+
+### Stored Functions
+
+```elixir
+# Create a stored function
+OracleDb.execute(db, """
+  CREATE FUNCTION get_greeting (p_name VARCHAR2)
+  RETURN VARCHAR2
+  IS
+  BEGIN
+    RETURN 'Hello ' || p_name;
+  END;
+""")
+
+# Create a function with multiple parameters
+OracleDb.execute(db, """
+  CREATE FUNCTION calculate_tax (p_amount NUMBER, p_rate NUMBER)
+  RETURN NUMBER
+  IS
+  BEGIN
+    RETURN p_amount * p_rate / 100;
+  END;
+""")
+
+# Replace an existing function
+OracleDb.execute(db, "CREATE OR REPLACE FUNCTION get_greeting (p_name VARCHAR2) RETURN VARCHAR2 IS BEGIN RETURN 'Hi ' || p_name; END;")
+
+# Drop a function
+OracleDb.execute(db, "DROP FUNCTION get_greeting")
+```
+
+### Packages
+
+```elixir
+# Create a package specification
+OracleDb.execute(db, """
+  CREATE PACKAGE user_pkg
+  IS
+    PROCEDURE add_user (p_name VARCHAR2);
+    FUNCTION get_user_count RETURN NUMBER;
+  END;
+""")
+
+# Create a package body
+OracleDb.execute(db, """
+  CREATE PACKAGE BODY user_pkg
+  IS
+    PROCEDURE add_user (p_name VARCHAR2)
+    IS
+    BEGIN
+      INSERT INTO users (name) VALUES (p_name);
+    END;
+    
+    FUNCTION get_user_count RETURN NUMBER
+    IS
+      v_count NUMBER;
+    BEGIN
+      SELECT COUNT(*) INTO v_count FROM users;
+      RETURN v_count;
+    END;
+  END;
+""")
+
+# Replace a package
+OracleDb.execute(db, "CREATE OR REPLACE PACKAGE user_pkg IS PROCEDURE add_user (p_name VARCHAR2); END;")
+
+# Drop a package body only
+OracleDb.execute(db, "DROP PACKAGE BODY user_pkg")
+
+# Drop an entire package
+OracleDb.execute(db, "DROP PACKAGE user_pkg")
+```
+
+### Triggers
+
+```elixir
+# Create a BEFORE INSERT trigger
+OracleDb.execute(db, """
+  CREATE TRIGGER audit_insert
+  BEFORE INSERT ON users
+  FOR EACH ROW
+  BEGIN
+    INSERT INTO audit_log (action, table_name, timestamp)
+    VALUES ('INSERT', 'users', SYSDATE);
+  END;
+""")
+
+# Create an AFTER UPDATE trigger
+OracleDb.execute(db, """
+  CREATE TRIGGER audit_update
+  AFTER UPDATE ON users
+  FOR EACH ROW
+  BEGIN
+    INSERT INTO audit_log (action, old_value, new_value)
+    VALUES ('UPDATE', :OLD.name, :NEW.name);
+  END;
+""")
+
+# Create a trigger for multiple events
+OracleDb.execute(db, """
+  CREATE TRIGGER audit_changes
+  BEFORE INSERT OR UPDATE OR DELETE ON users
+  FOR EACH ROW
+  BEGIN
+    NULL;
+  END;
+""")
+
+# Create a trigger with UPDATE OF specific columns
+OracleDb.execute(db, """
+  CREATE TRIGGER track_salary_changes
+  BEFORE UPDATE OF salary ON employees
+  FOR EACH ROW
+  BEGIN
+    INSERT INTO salary_history VALUES (:OLD.salary, :NEW.salary, SYSDATE);
+  END;
+""")
+
+# Create a trigger with WHEN clause
+OracleDb.execute(db, """
+  CREATE TRIGGER check_salary
+  BEFORE INSERT ON employees
+  FOR EACH ROW
+  WHEN (NEW.salary > 100000)
+  BEGIN
+    RAISE_APPLICATION_ERROR(-20001, 'Salary exceeds limit');
+  END;
+""")
+
+# Create INSTEAD OF trigger for views
+OracleDb.execute(db, """
+  CREATE TRIGGER instead_insert
+  INSTEAD OF INSERT ON user_view
+  FOR EACH ROW
+  BEGIN
+    INSERT INTO users VALUES (:NEW.id, :NEW.name);
+  END;
+""")
+
+# Enable/disable a trigger
+OracleDb.execute(db, "ALTER TRIGGER audit_insert ENABLE")
+OracleDb.execute(db, "ALTER TRIGGER audit_insert DISABLE")
+
+# Drop a trigger
+OracleDb.execute(db, "DROP TRIGGER audit_insert")
 ```
 
 ## Running Tests

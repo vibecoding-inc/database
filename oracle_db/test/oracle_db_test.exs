@@ -780,4 +780,362 @@ defmodule OracleDbTest do
       assert {:ok, %{message: "View DROP_OBJ_VIEW dropped"}} = result
     end
   end
+
+  describe "Stored Procedures" do
+    test "CREATE PROCEDURE creates a procedure", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE PROCEDURE hello_proc (p_name IN VARCHAR2)
+          IS
+          BEGIN
+            NULL;
+          END;
+        """)
+
+      assert {:ok, %{message: "Procedure HELLO_PROC created"}} = result
+    end
+
+    test "CREATE OR REPLACE PROCEDURE replaces a procedure", %{db: db} do
+      OracleDb.execute(db, """
+        CREATE PROCEDURE replace_proc IS BEGIN NULL; END;
+      """)
+
+      result =
+        OracleDb.execute(db, """
+          CREATE OR REPLACE PROCEDURE replace_proc IS BEGIN NULL; END;
+        """)
+
+      assert {:ok, %{message: "Procedure REPLACE_PROC created"}} = result
+    end
+
+    test "DROP PROCEDURE removes a procedure", %{db: db} do
+      OracleDb.execute(db, "CREATE PROCEDURE drop_me_proc IS BEGIN NULL; END;")
+      result = OracleDb.execute(db, "DROP PROCEDURE drop_me_proc")
+      assert {:ok, %{message: "Procedure DROP_ME_PROC dropped"}} = result
+    end
+
+    test "returns error for duplicate procedure creation", %{db: db} do
+      OracleDb.execute(db, "CREATE PROCEDURE dup_proc IS BEGIN NULL; END;")
+      result = OracleDb.execute(db, "CREATE PROCEDURE dup_proc IS BEGIN NULL; END;")
+      assert {:error, _} = result
+    end
+
+    test "returns error for dropping non-existent procedure", %{db: db} do
+      result = OracleDb.execute(db, "DROP PROCEDURE nonexistent_proc")
+      assert {:error, _} = result
+    end
+
+    test "CREATE PROCEDURE with OUT parameter", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE PROCEDURE get_value (p_id IN NUMBER, p_result OUT VARCHAR2)
+          IS
+          BEGIN
+            p_result := 'test';
+          END;
+        """)
+
+      assert {:ok, %{message: "Procedure GET_VALUE created"}} = result
+    end
+
+    test "CREATE PROCEDURE with IN OUT parameter", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE PROCEDURE update_value (p_value IN OUT NUMBER)
+          IS
+          BEGIN
+            p_value := p_value + 1;
+          END;
+        """)
+
+      assert {:ok, %{message: "Procedure UPDATE_VALUE created"}} = result
+    end
+  end
+
+  describe "Stored Functions" do
+    test "CREATE FUNCTION creates a function", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE FUNCTION get_greeting (p_name VARCHAR2)
+          RETURN VARCHAR2
+          IS
+          BEGIN
+            RETURN 'Hello ' || p_name;
+          END;
+        """)
+
+      assert {:ok, %{message: "Function GET_GREETING created"}} = result
+    end
+
+    test "CREATE OR REPLACE FUNCTION replaces a function", %{db: db} do
+      OracleDb.execute(db, """
+        CREATE FUNCTION replace_func RETURN NUMBER IS BEGIN RETURN 1; END;
+      """)
+
+      result =
+        OracleDb.execute(db, """
+          CREATE OR REPLACE FUNCTION replace_func RETURN NUMBER IS BEGIN RETURN 2; END;
+        """)
+
+      assert {:ok, %{message: "Function REPLACE_FUNC created"}} = result
+    end
+
+    test "DROP FUNCTION removes a function", %{db: db} do
+      OracleDb.execute(db, "CREATE FUNCTION drop_me_func RETURN NUMBER IS BEGIN RETURN 1; END;")
+      result = OracleDb.execute(db, "DROP FUNCTION drop_me_func")
+      assert {:ok, %{message: "Function DROP_ME_FUNC dropped"}} = result
+    end
+
+    test "returns error for duplicate function creation", %{db: db} do
+      OracleDb.execute(db, "CREATE FUNCTION dup_func RETURN NUMBER IS BEGIN RETURN 1; END;")
+
+      result =
+        OracleDb.execute(db, "CREATE FUNCTION dup_func RETURN NUMBER IS BEGIN RETURN 1; END;")
+
+      assert {:error, _} = result
+    end
+
+    test "returns error for dropping non-existent function", %{db: db} do
+      result = OracleDb.execute(db, "DROP FUNCTION nonexistent_func")
+      assert {:error, _} = result
+    end
+  end
+
+  describe "Packages" do
+    test "CREATE PACKAGE creates a package specification", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE PACKAGE my_package
+          IS
+            PROCEDURE proc1;
+            FUNCTION func1 RETURN NUMBER;
+          END;
+        """)
+
+      assert {:ok, %{message: "Package MY_PACKAGE created"}} = result
+    end
+
+    test "CREATE PACKAGE BODY creates a package body", %{db: db} do
+      OracleDb.execute(db, """
+        CREATE PACKAGE body_pkg IS PROCEDURE proc1; END;
+      """)
+
+      result =
+        OracleDb.execute(db, """
+          CREATE PACKAGE BODY body_pkg
+          IS
+            PROCEDURE proc1 IS BEGIN NULL; END;
+          END;
+        """)
+
+      assert {:ok, %{message: "Package body BODY_PKG created"}} = result
+    end
+
+    test "CREATE OR REPLACE PACKAGE replaces a package", %{db: db} do
+      OracleDb.execute(db, """
+        CREATE PACKAGE replace_pkg IS PROCEDURE proc1; END;
+      """)
+
+      result =
+        OracleDb.execute(db, """
+          CREATE OR REPLACE PACKAGE replace_pkg IS PROCEDURE proc2; END;
+        """)
+
+      assert {:ok, %{message: "Package REPLACE_PKG created"}} = result
+    end
+
+    test "DROP PACKAGE removes a package", %{db: db} do
+      OracleDb.execute(db, "CREATE PACKAGE drop_pkg IS PROCEDURE proc1; END;")
+      result = OracleDb.execute(db, "DROP PACKAGE drop_pkg")
+      assert {:ok, %{message: "Package DROP_PKG dropped"}} = result
+    end
+
+    test "DROP PACKAGE BODY removes only package body", %{db: db} do
+      OracleDb.execute(db, "CREATE PACKAGE body_drop_pkg IS PROCEDURE proc1; END;")
+
+      OracleDb.execute(
+        db,
+        "CREATE PACKAGE BODY body_drop_pkg IS PROCEDURE proc1 IS BEGIN NULL; END; END;"
+      )
+
+      result = OracleDb.execute(db, "DROP PACKAGE BODY body_drop_pkg")
+      assert {:ok, %{message: "Package body BODY_DROP_PKG dropped"}} = result
+    end
+
+    test "returns error for duplicate package creation", %{db: db} do
+      OracleDb.execute(db, "CREATE PACKAGE dup_pkg IS PROCEDURE proc1; END;")
+      result = OracleDb.execute(db, "CREATE PACKAGE dup_pkg IS PROCEDURE proc1; END;")
+      assert {:error, _} = result
+    end
+
+    test "returns error for dropping non-existent package", %{db: db} do
+      result = OracleDb.execute(db, "DROP PACKAGE nonexistent_pkg")
+      assert {:error, _} = result
+    end
+  end
+
+  describe "Triggers" do
+    setup %{db: db} do
+      OracleDb.execute(db, "CREATE TABLE trigger_test (id NUMBER, name VARCHAR2(100))")
+      :ok
+    end
+
+    test "CREATE TRIGGER creates a BEFORE trigger", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE TRIGGER before_insert_trigger
+          BEFORE INSERT ON trigger_test
+          FOR EACH ROW
+          BEGIN
+            NULL;
+          END;
+        """)
+
+      assert {:ok, %{message: "Trigger BEFORE_INSERT_TRIGGER created"}} = result
+    end
+
+    test "CREATE TRIGGER creates an AFTER trigger", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE TRIGGER after_update_trigger
+          AFTER UPDATE ON trigger_test
+          FOR EACH ROW
+          BEGIN
+            NULL;
+          END;
+        """)
+
+      assert {:ok, %{message: "Trigger AFTER_UPDATE_TRIGGER created"}} = result
+    end
+
+    test "CREATE TRIGGER for multiple events", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE TRIGGER multi_event_trigger
+          BEFORE INSERT OR UPDATE OR DELETE ON trigger_test
+          FOR EACH ROW
+          BEGIN
+            NULL;
+          END;
+        """)
+
+      assert {:ok, %{message: "Trigger MULTI_EVENT_TRIGGER created"}} = result
+    end
+
+    test "CREATE TRIGGER with UPDATE OF columns", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE TRIGGER update_col_trigger
+          BEFORE UPDATE OF name ON trigger_test
+          FOR EACH ROW
+          BEGIN
+            NULL;
+          END;
+        """)
+
+      assert {:ok, %{message: "Trigger UPDATE_COL_TRIGGER created"}} = result
+    end
+
+    test "CREATE TRIGGER with WHEN clause", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE TRIGGER when_trigger
+          BEFORE INSERT ON trigger_test
+          FOR EACH ROW
+          WHEN (NEW.id > 0)
+          BEGIN
+            NULL;
+          END;
+        """)
+
+      assert {:ok, %{message: "Trigger WHEN_TRIGGER created"}} = result
+    end
+
+    test "CREATE INSTEAD OF TRIGGER for views", %{db: db} do
+      OracleDb.execute(db, "CREATE VIEW trigger_view AS SELECT id, name FROM trigger_test")
+
+      result =
+        OracleDb.execute(db, """
+          CREATE TRIGGER instead_trigger
+          INSTEAD OF INSERT ON trigger_view
+          FOR EACH ROW
+          BEGIN
+            NULL;
+          END;
+        """)
+
+      assert {:ok, %{message: "Trigger INSTEAD_TRIGGER created"}} = result
+    end
+
+    test "CREATE OR REPLACE TRIGGER replaces a trigger", %{db: db} do
+      OracleDb.execute(db, """
+        CREATE TRIGGER replace_trigger BEFORE INSERT ON trigger_test FOR EACH ROW BEGIN NULL; END;
+      """)
+
+      result =
+        OracleDb.execute(db, """
+          CREATE OR REPLACE TRIGGER replace_trigger AFTER INSERT ON trigger_test FOR EACH ROW BEGIN NULL; END;
+        """)
+
+      assert {:ok, %{message: "Trigger REPLACE_TRIGGER created"}} = result
+    end
+
+    test "DROP TRIGGER removes a trigger", %{db: db} do
+      OracleDb.execute(db, """
+        CREATE TRIGGER drop_trigger BEFORE INSERT ON trigger_test FOR EACH ROW BEGIN NULL; END;
+      """)
+
+      result = OracleDb.execute(db, "DROP TRIGGER drop_trigger")
+      assert {:ok, %{message: "Trigger DROP_TRIGGER dropped"}} = result
+    end
+
+    test "ALTER TRIGGER ENABLE enables a trigger", %{db: db} do
+      OracleDb.execute(db, """
+        CREATE TRIGGER enable_trigger BEFORE INSERT ON trigger_test FOR EACH ROW BEGIN NULL; END;
+      """)
+
+      result = OracleDb.execute(db, "ALTER TRIGGER enable_trigger ENABLE")
+      assert {:ok, %{message: "Trigger ENABLE_TRIGGER enabled"}} = result
+    end
+
+    test "ALTER TRIGGER DISABLE disables a trigger", %{db: db} do
+      OracleDb.execute(db, """
+        CREATE TRIGGER disable_trigger BEFORE INSERT ON trigger_test FOR EACH ROW BEGIN NULL; END;
+      """)
+
+      result = OracleDb.execute(db, "ALTER TRIGGER disable_trigger DISABLE")
+      assert {:ok, %{message: "Trigger DISABLE_TRIGGER disabled"}} = result
+    end
+
+    test "returns error for duplicate trigger creation", %{db: db} do
+      OracleDb.execute(db, """
+        CREATE TRIGGER dup_trigger BEFORE INSERT ON trigger_test FOR EACH ROW BEGIN NULL; END;
+      """)
+
+      result =
+        OracleDb.execute(db, """
+          CREATE TRIGGER dup_trigger BEFORE INSERT ON trigger_test FOR EACH ROW BEGIN NULL; END;
+        """)
+
+      assert {:error, _} = result
+    end
+
+    test "returns error for dropping non-existent trigger", %{db: db} do
+      result = OracleDb.execute(db, "DROP TRIGGER nonexistent_trigger")
+      assert {:error, _} = result
+    end
+
+    test "CREATE TRIGGER for statement level", %{db: db} do
+      result =
+        OracleDb.execute(db, """
+          CREATE TRIGGER statement_trigger
+          AFTER INSERT ON trigger_test
+          BEGIN
+            NULL;
+          END;
+        """)
+
+      assert {:ok, %{message: "Trigger STATEMENT_TRIGGER created"}} = result
+    end
+  end
 end

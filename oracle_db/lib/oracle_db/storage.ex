@@ -261,6 +261,170 @@ defmodule OracleDb.Storage do
     GenServer.call(server, {:refresh_materialized_view, normalize_name(name)})
   end
 
+  # Stored Procedures and Functions
+
+  @doc """
+  Creates a stored procedure.
+  """
+  @spec create_procedure(GenServer.server(), String.t(), map()) :: :ok | {:error, String.t()}
+  def create_procedure(server \\ __MODULE__, name, procedure_def) do
+    GenServer.call(server, {:create_procedure, normalize_name(name), procedure_def})
+  end
+
+  @doc """
+  Drops a stored procedure.
+  """
+  @spec drop_procedure(GenServer.server(), String.t()) :: :ok | {:error, String.t()}
+  def drop_procedure(server \\ __MODULE__, name) do
+    GenServer.call(server, {:drop_procedure, normalize_name(name)})
+  end
+
+  @doc """
+  Gets a stored procedure definition.
+  """
+  @spec get_procedure(GenServer.server(), String.t()) :: {:ok, map()} | {:error, String.t()}
+  def get_procedure(server \\ __MODULE__, name) do
+    GenServer.call(server, {:get_procedure, normalize_name(name)})
+  end
+
+  @doc """
+  Lists all stored procedures.
+  """
+  @spec list_procedures(GenServer.server()) :: [String.t()]
+  def list_procedures(server \\ __MODULE__) do
+    GenServer.call(server, :list_procedures)
+  end
+
+  @doc """
+  Creates a stored function.
+  """
+  @spec create_function(GenServer.server(), String.t(), map()) :: :ok | {:error, String.t()}
+  def create_function(server \\ __MODULE__, name, function_def) do
+    GenServer.call(server, {:create_function, normalize_name(name), function_def})
+  end
+
+  @doc """
+  Drops a stored function.
+  """
+  @spec drop_function(GenServer.server(), String.t()) :: :ok | {:error, String.t()}
+  def drop_function(server \\ __MODULE__, name) do
+    GenServer.call(server, {:drop_function, normalize_name(name)})
+  end
+
+  @doc """
+  Gets a stored function definition.
+  """
+  @spec get_function(GenServer.server(), String.t()) :: {:ok, map()} | {:error, String.t()}
+  def get_function(server \\ __MODULE__, name) do
+    GenServer.call(server, {:get_function, normalize_name(name)})
+  end
+
+  @doc """
+  Lists all stored functions.
+  """
+  @spec list_functions(GenServer.server()) :: [String.t()]
+  def list_functions(server \\ __MODULE__) do
+    GenServer.call(server, :list_functions)
+  end
+
+  @doc """
+  Creates a package.
+  """
+  @spec create_package(GenServer.server(), String.t(), map()) :: :ok | {:error, String.t()}
+  def create_package(server \\ __MODULE__, name, package_def) do
+    GenServer.call(server, {:create_package, normalize_name(name), package_def})
+  end
+
+  @doc """
+  Creates a package body.
+  """
+  @spec create_package_body(GenServer.server(), String.t(), map()) :: :ok | {:error, String.t()}
+  def create_package_body(server \\ __MODULE__, name, body_def) do
+    GenServer.call(server, {:create_package_body, normalize_name(name), body_def})
+  end
+
+  @doc """
+  Drops a package.
+  """
+  @spec drop_package(GenServer.server(), String.t(), boolean()) :: :ok | {:error, String.t()}
+  def drop_package(server \\ __MODULE__, name, body_only \\ false) do
+    GenServer.call(server, {:drop_package, normalize_name(name), body_only})
+  end
+
+  @doc """
+  Gets a package definition.
+  """
+  @spec get_package(GenServer.server(), String.t()) :: {:ok, map()} | {:error, String.t()}
+  def get_package(server \\ __MODULE__, name) do
+    GenServer.call(server, {:get_package, normalize_name(name)})
+  end
+
+  @doc """
+  Lists all packages.
+  """
+  @spec list_packages(GenServer.server()) :: [String.t()]
+  def list_packages(server \\ __MODULE__) do
+    GenServer.call(server, :list_packages)
+  end
+
+  # Triggers
+
+  @doc """
+  Creates a trigger.
+  """
+  @spec create_trigger(GenServer.server(), String.t(), map()) :: :ok | {:error, String.t()}
+  def create_trigger(server \\ __MODULE__, name, trigger_def) do
+    GenServer.call(server, {:create_trigger, normalize_name(name), trigger_def})
+  end
+
+  @doc """
+  Drops a trigger.
+  """
+  @spec drop_trigger(GenServer.server(), String.t()) :: :ok | {:error, String.t()}
+  def drop_trigger(server \\ __MODULE__, name) do
+    GenServer.call(server, {:drop_trigger, normalize_name(name)})
+  end
+
+  @doc """
+  Enables a trigger.
+  """
+  @spec enable_trigger(GenServer.server(), String.t()) :: :ok | {:error, String.t()}
+  def enable_trigger(server \\ __MODULE__, name) do
+    GenServer.call(server, {:enable_trigger, normalize_name(name)})
+  end
+
+  @doc """
+  Disables a trigger.
+  """
+  @spec disable_trigger(GenServer.server(), String.t()) :: :ok | {:error, String.t()}
+  def disable_trigger(server \\ __MODULE__, name) do
+    GenServer.call(server, {:disable_trigger, normalize_name(name)})
+  end
+
+  @doc """
+  Gets a trigger definition.
+  """
+  @spec get_trigger(GenServer.server(), String.t()) :: {:ok, map()} | {:error, String.t()}
+  def get_trigger(server \\ __MODULE__, name) do
+    GenServer.call(server, {:get_trigger, normalize_name(name)})
+  end
+
+  @doc """
+  Lists all triggers.
+  """
+  @spec list_triggers(GenServer.server()) :: [String.t()]
+  def list_triggers(server \\ __MODULE__) do
+    GenServer.call(server, :list_triggers)
+  end
+
+  @doc """
+  Gets triggers for a specific table.
+  """
+  @spec get_table_triggers(GenServer.server(), String.t()) :: [map()]
+  def get_table_triggers(server \\ __MODULE__, table_name) do
+    GenServer.call(server, {:get_table_triggers, normalize_name(table_name)})
+  end
+
   @doc """
   Gets all table names.
   """
@@ -289,7 +453,11 @@ defmodule OracleDb.Storage do
       row_counter: %{},
       types: %{},
       views: %{},
-      materialized_views: %{}
+      materialized_views: %{},
+      procedures: %{},
+      functions: %{},
+      packages: %{},
+      triggers: %{}
     }
 
     {:ok, state}
@@ -643,6 +811,226 @@ defmodule OracleDb.Storage do
     else
       {:reply, {:error, "Materialized view #{view_name} does not exist"}, state}
     end
+  end
+
+  # Stored Procedures
+
+  @impl true
+  def handle_call({:create_procedure, proc_name, proc_def}, _from, state) do
+    replace = Map.get(proc_def, :replace, false)
+
+    if Map.has_key?(state.procedures, proc_name) and not replace do
+      {:reply, {:error, "Procedure #{proc_name} already exists"}, state}
+    else
+      new_state = %{state | procedures: Map.put(state.procedures, proc_name, proc_def)}
+      {:reply, :ok, new_state}
+    end
+  end
+
+  @impl true
+  def handle_call({:drop_procedure, proc_name}, _from, state) do
+    if Map.has_key?(state.procedures, proc_name) do
+      new_state = %{state | procedures: Map.delete(state.procedures, proc_name)}
+      {:reply, :ok, new_state}
+    else
+      {:reply, {:error, "Procedure #{proc_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:get_procedure, proc_name}, _from, state) do
+    case Map.fetch(state.procedures, proc_name) do
+      {:ok, proc_def} -> {:reply, {:ok, proc_def}, state}
+      :error -> {:reply, {:error, "Procedure #{proc_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:list_procedures, _from, state) do
+    {:reply, Map.keys(state.procedures), state}
+  end
+
+  # Stored Functions
+
+  @impl true
+  def handle_call({:create_function, func_name, func_def}, _from, state) do
+    replace = Map.get(func_def, :replace, false)
+
+    if Map.has_key?(state.functions, func_name) and not replace do
+      {:reply, {:error, "Function #{func_name} already exists"}, state}
+    else
+      new_state = %{state | functions: Map.put(state.functions, func_name, func_def)}
+      {:reply, :ok, new_state}
+    end
+  end
+
+  @impl true
+  def handle_call({:drop_function, func_name}, _from, state) do
+    if Map.has_key?(state.functions, func_name) do
+      new_state = %{state | functions: Map.delete(state.functions, func_name)}
+      {:reply, :ok, new_state}
+    else
+      {:reply, {:error, "Function #{func_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:get_function, func_name}, _from, state) do
+    case Map.fetch(state.functions, func_name) do
+      {:ok, func_def} -> {:reply, {:ok, func_def}, state}
+      :error -> {:reply, {:error, "Function #{func_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:list_functions, _from, state) do
+    {:reply, Map.keys(state.functions), state}
+  end
+
+  # Packages
+
+  @impl true
+  def handle_call({:create_package, pkg_name, pkg_def}, _from, state) do
+    replace = Map.get(pkg_def, :replace, false)
+
+    if Map.has_key?(state.packages, pkg_name) and not replace do
+      {:reply, {:error, "Package #{pkg_name} already exists"}, state}
+    else
+      # When replacing, start fresh with new specification
+      # When new, initialize with just the specification
+      new_pkg =
+        if replace do
+          %{spec: pkg_def}
+        else
+          %{spec: pkg_def}
+        end
+
+      new_state = %{state | packages: Map.put(state.packages, pkg_name, new_pkg)}
+      {:reply, :ok, new_state}
+    end
+  end
+
+  @impl true
+  def handle_call({:create_package_body, pkg_name, body_def}, _from, state) do
+    case Map.fetch(state.packages, pkg_name) do
+      {:ok, pkg} ->
+        new_pkg = Map.put(pkg, :body, body_def)
+        new_state = %{state | packages: Map.put(state.packages, pkg_name, new_pkg)}
+        {:reply, :ok, new_state}
+
+      :error ->
+        {:reply, {:error, "Package #{pkg_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:drop_package, pkg_name, body_only}, _from, state) do
+    case Map.fetch(state.packages, pkg_name) do
+      {:ok, pkg} ->
+        if body_only do
+          new_pkg = Map.delete(pkg, :body)
+          new_state = %{state | packages: Map.put(state.packages, pkg_name, new_pkg)}
+          {:reply, :ok, new_state}
+        else
+          new_state = %{state | packages: Map.delete(state.packages, pkg_name)}
+          {:reply, :ok, new_state}
+        end
+
+      :error ->
+        {:reply, {:error, "Package #{pkg_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:get_package, pkg_name}, _from, state) do
+    case Map.fetch(state.packages, pkg_name) do
+      {:ok, pkg_def} -> {:reply, {:ok, pkg_def}, state}
+      :error -> {:reply, {:error, "Package #{pkg_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:list_packages, _from, state) do
+    {:reply, Map.keys(state.packages), state}
+  end
+
+  # Triggers
+
+  @impl true
+  def handle_call({:create_trigger, trigger_name, trigger_def}, _from, state) do
+    replace = Map.get(trigger_def, :replace, false)
+
+    if Map.has_key?(state.triggers, trigger_name) and not replace do
+      {:reply, {:error, "Trigger #{trigger_name} already exists"}, state}
+    else
+      # Triggers are enabled by default
+      trigger_with_status = Map.put_new(trigger_def, :enabled, true)
+      new_state = %{state | triggers: Map.put(state.triggers, trigger_name, trigger_with_status)}
+      {:reply, :ok, new_state}
+    end
+  end
+
+  @impl true
+  def handle_call({:drop_trigger, trigger_name}, _from, state) do
+    if Map.has_key?(state.triggers, trigger_name) do
+      new_state = %{state | triggers: Map.delete(state.triggers, trigger_name)}
+      {:reply, :ok, new_state}
+    else
+      {:reply, {:error, "Trigger #{trigger_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:enable_trigger, trigger_name}, _from, state) do
+    case Map.fetch(state.triggers, trigger_name) do
+      {:ok, trigger_def} ->
+        new_trigger = Map.put(trigger_def, :enabled, true)
+        new_state = %{state | triggers: Map.put(state.triggers, trigger_name, new_trigger)}
+        {:reply, :ok, new_state}
+
+      :error ->
+        {:reply, {:error, "Trigger #{trigger_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:disable_trigger, trigger_name}, _from, state) do
+    case Map.fetch(state.triggers, trigger_name) do
+      {:ok, trigger_def} ->
+        new_trigger = Map.put(trigger_def, :enabled, false)
+        new_state = %{state | triggers: Map.put(state.triggers, trigger_name, new_trigger)}
+        {:reply, :ok, new_state}
+
+      :error ->
+        {:reply, {:error, "Trigger #{trigger_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:get_trigger, trigger_name}, _from, state) do
+    case Map.fetch(state.triggers, trigger_name) do
+      {:ok, trigger_def} -> {:reply, {:ok, trigger_def}, state}
+      :error -> {:reply, {:error, "Trigger #{trigger_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:list_triggers, _from, state) do
+    {:reply, Map.keys(state.triggers), state}
+  end
+
+  @impl true
+  def handle_call({:get_table_triggers, table_name}, _from, state) do
+    normalized_table = String.upcase(table_name)
+
+    triggers =
+      state.triggers
+      |> Enum.filter(fn {_name, trigger_def} ->
+        String.upcase(to_string(Map.get(trigger_def, :table, ""))) == normalized_table
+      end)
+      |> Enum.map(fn {name, def} -> Map.put(def, :name, name) end)
+
+    {:reply, triggers, state}
   end
 
   # Private functions

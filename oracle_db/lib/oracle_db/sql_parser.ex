@@ -732,6 +732,14 @@ defmodule OracleDb.SqlParser do
       ["VIEW" | rest] -> parse_create_view(rest)
       ["OR", "REPLACE", "VIEW" | rest] -> parse_create_view(rest, true)
       ["MATERIALIZED", "VIEW" | rest] -> parse_create_materialized_view(rest)
+      ["PROCEDURE" | rest] -> parse_create_procedure(rest)
+      ["OR", "REPLACE", "PROCEDURE" | rest] -> parse_create_procedure(rest, true)
+      ["FUNCTION" | rest] -> parse_create_function(rest)
+      ["OR", "REPLACE", "FUNCTION" | rest] -> parse_create_function(rest, true)
+      ["TRIGGER" | rest] -> parse_create_trigger(rest)
+      ["OR", "REPLACE", "TRIGGER" | rest] -> parse_create_trigger(rest, true)
+      ["PACKAGE" | rest] -> parse_create_package(rest)
+      ["OR", "REPLACE", "PACKAGE" | rest] -> parse_create_package(rest, true)
       _ -> {:error, "Unknown CREATE command"}
     end
   end
@@ -1190,6 +1198,494 @@ defmodule OracleDb.SqlParser do
     end
   end
 
+  # Parse CREATE PROCEDURE statement
+  defp parse_create_procedure(tokens, replace \\ false) do
+    case tokens do
+      [proc_name | rest] ->
+        {params, remaining} = parse_procedure_params(rest)
+        {body, _final} = parse_plsql_body(remaining)
+
+        {:create_procedure,
+         %{
+           name: proc_name,
+           parameters: params,
+           body: body,
+           replace: replace
+         }}
+
+      _ ->
+        {:error, "Invalid CREATE PROCEDURE syntax"}
+    end
+  end
+
+  defp parse_procedure_params(["(" | rest]) do
+    parse_proc_params_list(rest, [])
+  end
+
+  defp parse_procedure_params(rest) do
+    {[], rest}
+  end
+
+  defp parse_proc_params_list([")" | rest], acc) do
+    {Enum.reverse(acc), rest}
+  end
+
+  defp parse_proc_params_list(["," | rest], acc) do
+    parse_proc_params_list(rest, acc)
+  end
+
+  defp parse_proc_params_list([name | rest], acc) when is_binary(name) do
+    case String.upcase(name) do
+      "IN" ->
+        # IN mode or IN OUT mode
+        case rest do
+          ["OUT", param_name | r] ->
+            # IN OUT mode - param_name is next after "OUT"
+            parse_proc_param_type(r, param_name, :in_out, acc)
+
+          [param_name | r] ->
+            # Just IN mode
+            parse_proc_param_type(r, param_name, :in, acc)
+
+          _ ->
+            {Enum.reverse(acc), rest}
+        end
+
+      "OUT" ->
+        # OUT mode
+        case rest do
+          [param_name | r] ->
+            parse_proc_param_type(r, param_name, :out, acc)
+
+          _ ->
+            {Enum.reverse(acc), rest}
+        end
+
+      _ ->
+        # Parameter name without mode (default IN)
+        parse_proc_param_type(rest, name, :in, acc)
+    end
+  end
+
+  defp parse_proc_params_list(rest, acc) do
+    {Enum.reverse(acc), rest}
+  end
+
+  defp parse_proc_param_type([], name, mode, acc) do
+    # No type specified, use default
+    param = %{name: name, type: "ANY", mode: mode}
+    {Enum.reverse([param | acc]), []}
+  end
+
+  defp parse_proc_param_type([")" | rest], name, mode, acc) do
+    # Closing paren reached before type
+    param = %{name: name, type: "ANY", mode: mode}
+    {Enum.reverse([param | acc]), rest}
+  end
+
+  defp parse_proc_param_type([type | rest], name, mode, acc) do
+    # Check for type modifiers
+    {full_type, remaining} =
+      case rest do
+        ["(" | r] ->
+          # Type with size, e.g., VARCHAR2(100)
+          {size_tokens, r2} = collect_until_paren(r, [])
+          {type <> "(" <> Enum.join(size_tokens, ",") <> ")", r2}
+
+        _ ->
+          {type, rest}
+      end
+
+    param = %{name: name, type: full_type, mode: mode}
+    parse_proc_params_list(remaining, [param | acc])
+  end
+
+  defp collect_until_paren([")" | rest], acc) do
+    {Enum.reverse(acc), rest}
+  end
+
+  defp collect_until_paren([t | rest], acc) do
+    collect_until_paren(rest, [t | acc])
+  end
+
+  defp collect_until_paren([], acc) do
+    {Enum.reverse(acc), []}
+  end
+
+  defp parse_plsql_body(tokens) do
+    # Find IS or AS keyword which starts the PL/SQL block
+    case find_plsql_start(tokens) do
+      {_before, body_tokens} ->
+        # Collect everything until END; as the body
+        {body_text, remaining} = collect_plsql_body(body_tokens, [], 0)
+        {body_text, remaining}
+
+      nil ->
+        {"", tokens}
+    end
+  end
+
+  defp find_plsql_start(tokens) do
+    find_plsql_start(tokens, [])
+  end
+
+  defp find_plsql_start([], _acc), do: nil
+
+  defp find_plsql_start([token | rest], acc) when is_binary(token) do
+    case String.upcase(token) do
+      kw when kw in ["IS", "AS"] -> {Enum.reverse(acc), rest}
+      _ -> find_plsql_start(rest, [token | acc])
+    end
+  end
+
+  defp find_plsql_start([token | rest], acc) do
+    find_plsql_start(rest, [token | acc])
+  end
+
+  defp collect_plsql_body([], acc, _depth) do
+    {Enum.reverse(acc) |> Enum.join(" "), []}
+  end
+
+  defp collect_plsql_body([token | rest], acc, depth) when is_binary(token) do
+    case String.upcase(token) do
+      "BEGIN" ->
+        collect_plsql_body(rest, [token | acc], depth + 1)
+
+      "END" ->
+        # End the block if we're at the outermost level (depth == 1 after seeing at least one BEGIN)
+        # or if we haven't seen any BEGIN yet (depth == 0)
+        if depth <= 1 do
+          # Check for semicolon or procedure name after END
+          remaining =
+            case rest do
+              [next | r] when is_binary(next) ->
+                if String.upcase(next) == ";" or String.ends_with?(next, ";") do
+                  r
+                else
+                  # Skip procedure name after END
+                  case r do
+                    [";" | r2] -> r2
+                    _ -> r
+                  end
+                end
+
+              _ ->
+                rest
+            end
+
+          {Enum.reverse([token | acc]) |> Enum.join(" "), remaining}
+        else
+          collect_plsql_body(rest, [token | acc], depth - 1)
+        end
+
+      _ ->
+        collect_plsql_body(rest, [token | acc], depth)
+    end
+  end
+
+  defp collect_plsql_body([{:string, s} | rest], acc, depth) do
+    collect_plsql_body(rest, ["'#{s}'" | acc], depth)
+  end
+
+  defp collect_plsql_body([token | rest], acc, depth) do
+    collect_plsql_body(rest, [inspect(token) | acc], depth)
+  end
+
+  # Parse CREATE FUNCTION statement
+  defp parse_create_function(tokens, replace \\ false) do
+    case tokens do
+      [func_name | rest] ->
+        {params, remaining} = parse_procedure_params(rest)
+        {return_type, remaining2} = parse_function_return(remaining)
+        {body, _final} = parse_plsql_body(remaining2)
+
+        {:create_function,
+         %{
+           name: func_name,
+           parameters: params,
+           return_type: return_type,
+           body: body,
+           replace: replace
+         }}
+
+      _ ->
+        {:error, "Invalid CREATE FUNCTION syntax"}
+    end
+  end
+
+  defp parse_function_return(["RETURN" | [type | rest]]) do
+    {type, rest}
+  end
+
+  defp parse_function_return(rest) do
+    {nil, rest}
+  end
+
+  # Parse CREATE TRIGGER statement
+  defp parse_create_trigger(tokens, replace \\ false) do
+    case tokens do
+      [trigger_name | rest] ->
+        {timing, remaining} = parse_trigger_timing(rest)
+        {events, remaining2} = parse_trigger_events(remaining)
+        {table, remaining3} = parse_trigger_table(remaining2)
+        {for_each, remaining4} = parse_trigger_for_each(remaining3)
+        {when_clause, remaining5} = parse_trigger_when(remaining4)
+        {body, _final} = parse_plsql_body(remaining5)
+
+        {:create_trigger,
+         %{
+           name: trigger_name,
+           timing: timing,
+           events: events,
+           table: table,
+           for_each: for_each,
+           when_clause: when_clause,
+           body: body,
+           replace: replace
+         }}
+
+      _ ->
+        {:error, "Invalid CREATE TRIGGER syntax"}
+    end
+  end
+
+  defp parse_trigger_timing([timing | rest]) when is_binary(timing) do
+    case String.upcase(timing) do
+      "BEFORE" -> {:before, rest}
+      "AFTER" -> {:after, rest}
+      "INSTEAD" -> parse_instead_of(rest)
+      _ -> {:unknown, [timing | rest]}
+    end
+  end
+
+  defp parse_trigger_timing(rest), do: {:unknown, rest}
+
+  defp parse_instead_of(["OF" | rest]) do
+    {:instead_of, rest}
+  end
+
+  defp parse_instead_of(rest), do: {:instead_of, rest}
+
+  defp parse_trigger_events(tokens) do
+    parse_trigger_events(tokens, [])
+  end
+
+  defp parse_trigger_events([event | rest], acc) when is_binary(event) do
+    case String.upcase(event) do
+      ev when ev in ["INSERT", "UPDATE", "DELETE"] ->
+        # Check for UPDATE OF columns
+        {event_detail, remaining} =
+          if ev == "UPDATE" do
+            case rest do
+              ["OF" | cols_rest] ->
+                {cols, r} = collect_update_columns(cols_rest, [])
+                {{:update, cols}, r}
+
+              _ ->
+                {:update, rest}
+            end
+          else
+            {String.to_atom(String.downcase(ev)), rest}
+          end
+
+        # Check for OR to chain more events
+        case remaining do
+          ["OR" | more] ->
+            parse_trigger_events(more, [event_detail | acc])
+
+          _ ->
+            {Enum.reverse([event_detail | acc]), remaining}
+        end
+
+      "ON" ->
+        {Enum.reverse(acc), [event | rest]}
+
+      _ ->
+        {Enum.reverse(acc), [event | rest]}
+    end
+  end
+
+  defp parse_trigger_events(rest, acc) do
+    {Enum.reverse(acc), rest}
+  end
+
+  defp collect_update_columns([col | rest], acc) when is_binary(col) do
+    case String.upcase(col) do
+      kw when kw in ["OR", "ON"] ->
+        {Enum.reverse(acc), [col | rest]}
+
+      "," ->
+        collect_update_columns(rest, acc)
+
+      _ ->
+        collect_update_columns(rest, [col | acc])
+    end
+  end
+
+  defp collect_update_columns(rest, acc) do
+    {Enum.reverse(acc), rest}
+  end
+
+  defp parse_trigger_table(["ON", table | rest]) do
+    {table, rest}
+  end
+
+  defp parse_trigger_table(rest) do
+    {nil, rest}
+  end
+
+  defp parse_trigger_for_each(["FOR", "EACH", scope | rest]) when is_binary(scope) do
+    case String.upcase(scope) do
+      "ROW" -> {:row, rest}
+      "STATEMENT" -> {:statement, rest}
+      _ -> {:statement, [scope | rest]}
+    end
+  end
+
+  defp parse_trigger_for_each(rest) do
+    {:statement, rest}
+  end
+
+  defp parse_trigger_when(["WHEN", "(" | rest]) do
+    {condition, remaining} = collect_until_paren(rest, [])
+    {Enum.join(condition, " "), remaining}
+  end
+
+  defp parse_trigger_when(rest) do
+    {nil, rest}
+  end
+
+  # Parse CREATE PACKAGE statement
+  defp parse_create_package(tokens, replace \\ false) do
+    case tokens do
+      ["BODY", pkg_name | rest] ->
+        # Package body
+        {body, _final} = parse_plsql_body(rest)
+
+        {:create_package_body,
+         %{
+           name: pkg_name,
+           body: body,
+           replace: replace
+         }}
+
+      [pkg_name | rest] ->
+        # Package specification
+        {declarations, _final} = parse_package_spec(rest)
+
+        {:create_package,
+         %{
+           name: pkg_name,
+           declarations: declarations,
+           replace: replace
+         }}
+
+      _ ->
+        {:error, "Invalid CREATE PACKAGE syntax"}
+    end
+  end
+
+  defp parse_package_spec(tokens) do
+    # Find IS or AS keyword
+    case find_plsql_start(tokens) do
+      {_before, body_tokens} ->
+        # Parse package declarations until END
+        parse_package_declarations(body_tokens, [])
+
+      nil ->
+        {[], tokens}
+    end
+  end
+
+  defp parse_package_declarations([], acc) do
+    {Enum.reverse(acc), []}
+  end
+
+  defp parse_package_declarations([token | rest], acc) when is_binary(token) do
+    case String.upcase(token) do
+      "END" ->
+        {Enum.reverse(acc), rest}
+
+      "PROCEDURE" ->
+        {proc_decl, remaining} = parse_package_procedure_decl(rest)
+        parse_package_declarations(remaining, [proc_decl | acc])
+
+      "FUNCTION" ->
+        {func_decl, remaining} = parse_package_function_decl(rest)
+        parse_package_declarations(remaining, [func_decl | acc])
+
+      "TYPE" ->
+        {type_decl, remaining} = parse_package_type_decl(rest)
+        parse_package_declarations(remaining, [type_decl | acc])
+
+      _ ->
+        # Skip other declarations/tokens
+        parse_package_declarations(rest, acc)
+    end
+  end
+
+  defp parse_package_declarations([_ | rest], acc) do
+    parse_package_declarations(rest, acc)
+  end
+
+  defp parse_package_procedure_decl([proc_name | rest]) do
+    {params, remaining} = parse_procedure_params(rest)
+
+    # Skip to semicolon
+    remaining =
+      case skip_to_semicolon(remaining) do
+        {:ok, r} -> r
+        :not_found -> remaining
+      end
+
+    {{:procedure, proc_name, params}, remaining}
+  end
+
+  defp parse_package_function_decl([func_name | rest]) do
+    {params, remaining} = parse_procedure_params(rest)
+    {return_type, remaining2} = parse_function_return(remaining)
+
+    # Skip to semicolon
+    remaining3 =
+      case skip_to_semicolon(remaining2) do
+        {:ok, r} -> r
+        :not_found -> remaining2
+      end
+
+    {{:function, func_name, params, return_type}, remaining3}
+  end
+
+  defp parse_package_type_decl([type_name | rest]) do
+    # Skip to semicolon for simple type declarations
+    remaining =
+      case skip_to_semicolon(rest) do
+        {:ok, r} -> r
+        :not_found -> rest
+      end
+
+    {{:type, type_name}, remaining}
+  end
+
+  defp skip_to_semicolon([]) do
+    :not_found
+  end
+
+  defp skip_to_semicolon([";" | rest]) do
+    {:ok, rest}
+  end
+
+  defp skip_to_semicolon([token | rest]) when is_binary(token) do
+    if String.ends_with?(token, ";") do
+      {:ok, rest}
+    else
+      skip_to_semicolon(rest)
+    end
+  end
+
+  defp skip_to_semicolon([_ | rest]) do
+    skip_to_semicolon(rest)
+  end
+
   defp parse_element_type([type | rest]) do
     {type_info, _} = parse_attribute_type([type | rest])
     {type_info, rest}
@@ -1585,6 +2081,21 @@ defmodule OracleDb.SqlParser do
       ["MATERIALIZED", "VIEW", name | _] ->
         {:drop_materialized_view, %{name: name}}
 
+      ["PROCEDURE", name | _] ->
+        {:drop_procedure, %{name: name}}
+
+      ["FUNCTION", name | _] ->
+        {:drop_function, %{name: name}}
+
+      ["TRIGGER", name | _] ->
+        {:drop_trigger, %{name: name}}
+
+      ["PACKAGE", "BODY", name | _] ->
+        {:drop_package_body, %{name: name}}
+
+      ["PACKAGE", name | _] ->
+        {:drop_package, %{name: name}}
+
       _ ->
         {:error, "Unknown DROP command"}
     end
@@ -1596,8 +2107,22 @@ defmodule OracleDb.SqlParser do
       ["TABLE" | rest] -> parse_alter_table(rest)
       ["TYPE" | rest] -> parse_alter_type(rest)
       ["VIEW" | rest] -> parse_alter_view(rest)
+      ["TRIGGER", name, "ENABLE" | _] -> {:alter_trigger, %{name: name, action: :enable}}
+      ["TRIGGER", name, "DISABLE" | _] -> {:alter_trigger, %{name: name, action: :disable}}
+      ["TRIGGER", name, "COMPILE" | _] -> {:alter_trigger, %{name: name, action: :compile}}
+      ["PROCEDURE", name, "COMPILE" | _] -> {:alter_procedure, %{name: name, action: :compile}}
+      ["FUNCTION", name, "COMPILE" | _] -> {:alter_function, %{name: name, action: :compile}}
+      ["PACKAGE", name, "COMPILE" | rest] -> parse_alter_package(name, rest)
       _ -> {:error, "Unknown ALTER command"}
     end
+  end
+
+  defp parse_alter_package(name, ["BODY" | _]) do
+    {:alter_package, %{name: name, action: :compile_body}}
+  end
+
+  defp parse_alter_package(name, _rest) do
+    {:alter_package, %{name: name, action: :compile}}
   end
 
   defp parse_alter_view([view_name | rest]) do

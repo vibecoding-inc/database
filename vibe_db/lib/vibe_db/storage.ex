@@ -1817,31 +1817,6 @@ defmodule VibeDb.Storage do
     {:error, "Invalid ALTER TABLE action"}
   end
 
-  defp insert_rows(state, table_name, schema, columns, values_list) do
-    column_names =
-      if columns do
-        columns
-      else
-        Enum.map(schema.columns, fn {name, _, _} -> name end)
-      end
-
-    {new_rows, new_counter} =
-      Enum.reduce(values_list, {[], state.row_counter[table_name]}, fn values, {acc, counter} ->
-        row = build_row(column_names, values, counter + 1)
-        {[row | acc], counter + 1}
-      end)
-
-    existing_rows = Map.get(state.data, table_name, [])
-
-    new_state = %{
-      state
-      | data: Map.put(state.data, table_name, existing_rows ++ Enum.reverse(new_rows)),
-        row_counter: Map.put(state.row_counter, table_name, new_counter)
-    }
-
-    {:ok, new_state, length(values_list)}
-  end
-
   defp build_row(columns, values, rownum) do
     row =
       columns
@@ -3085,41 +3060,4 @@ defmodule VibeDb.Storage do
   end
 
   defp escape_xml_attr(value), do: escape_xml(to_string(value))
-
-  defp apply_update(rows, sets, where) do
-    {updated, count} =
-      Enum.map_reduce(rows, 0, fn row, acc ->
-        if evaluate_condition(row, where) do
-          updated_row =
-            Enum.reduce(sets, row, fn {col, value}, r ->
-              # Find the actual key in the row (case-insensitive)
-              actual_key =
-                Enum.find(Map.keys(r), fn k ->
-                  String.upcase(to_string(k)) == String.upcase(col)
-                end) || col
-
-              Map.put(r, actual_key, value)
-            end)
-
-          {updated_row, acc + 1}
-        else
-          {row, acc}
-        end
-      end)
-
-    {updated, count}
-  end
-
-  defp apply_delete(rows, nil) do
-    {[], length(rows)}
-  end
-
-  defp apply_delete(rows, where) do
-    {remaining, deleted} =
-      Enum.split_with(rows, fn row ->
-        not evaluate_condition(row, where)
-      end)
-
-    {remaining, length(deleted)}
-  end
 end

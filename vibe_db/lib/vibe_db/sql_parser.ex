@@ -1,6 +1,6 @@
-defmodule OracleDb.SqlParser do
+defmodule VibeDb.SqlParser do
   @moduledoc """
-  SQL Parser for Oracle SQL-compatible statements.
+  SQL Parser for VibeDb SQL-compatible statements.
   Parses SQL statements into structured AST representations.
   """
 
@@ -286,7 +286,7 @@ defmodule OracleDb.SqlParser do
     # Parse ORDER BY clause (optional)
     {order_by, rest} = parse_order_by(rest)
 
-    # Parse ROWNUM (Oracle-specific, in WHERE clause usually)
+    # Parse ROWNUM (VibeDb-specific, in WHERE clause usually)
     {rownum, _rest} = parse_rownum(rest)
 
     {:select,
@@ -464,7 +464,7 @@ defmodule OracleDb.SqlParser do
   defp parse_from(tokens) do
     case find_keyword(tokens, "FROM") do
       nil ->
-        # Check for DUAL (Oracle allows SELECT without FROM when using DUAL implicitly)
+        # Check for DUAL (VibeDb allows SELECT without FROM when using DUAL implicitly)
         {nil, tokens}
 
       {_before, rest} ->

@@ -1,4 +1,4 @@
-defmodule OracleDb.PlsqlInterpreter do
+defmodule VibeDb.PlsqlInterpreter do
   @moduledoc """
   PL/SQL Interpreter for executing PL/SQL code blocks, procedures, and functions.
 
@@ -13,7 +13,7 @@ defmodule OracleDb.PlsqlInterpreter do
   - DBMS_OUTPUT.PUT_LINE
   """
 
-  alias OracleDb.Storage
+  alias VibeDb.Storage
 
   @type exec_result :: {:ok, map()} | {:error, String.t()}
   @type context :: %{
@@ -881,7 +881,7 @@ defmodule OracleDb.PlsqlInterpreter do
         {:ok, %{context | variables: new_vars}}
 
       {:ok, []} ->
-        # No data found - would raise NO_DATA_FOUND in Oracle
+        # No data found - would raise NO_DATA_FOUND in VibeDb
         {:error, "NO_DATA_FOUND"}
 
       {:error, _} = err ->
@@ -893,7 +893,7 @@ defmodule OracleDb.PlsqlInterpreter do
     # Execute DML statement using the query executor
     case substitute_variables(sql, context) do
       {:ok, substituted_sql} ->
-        case OracleDb.QueryExecutor.execute(context.storage, substituted_sql) do
+        case VibeDb.QueryExecutor.execute(context.storage, substituted_sql) do
           {:ok, _} -> {:ok, context}
           {:error, _} = err -> err
         end
@@ -953,7 +953,7 @@ defmodule OracleDb.PlsqlInterpreter do
   defp execute_sql_query(sql, context) do
     case substitute_variables(sql, context) do
       {:ok, substituted_sql} ->
-        OracleDb.QueryExecutor.execute(context.storage, substituted_sql)
+        VibeDb.QueryExecutor.execute(context.storage, substituted_sql)
 
       {:error, _} = err ->
         err

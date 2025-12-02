@@ -1,5 +1,5 @@
 {
-  description = "OracleDb - An in-memory Oracle SQL-compatible database in Elixir";
+  description = "VibeDb - An in-memory VibeDb SQL-compatible database in Elixir";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -16,12 +16,12 @@
         elixir = beamPackages.elixir_1_17;
         erlang = pkgs.beam.interpreters.erlang_27;
         
-        # Build the oracle_db escript
-        oracle_db = pkgs.stdenv.mkDerivation {
-          pname = "oracle_db";
+        # Build the vibe_db escript
+        vibe_db = pkgs.stdenv.mkDerivation {
+          pname = "vibe_db";
           version = "0.1.0";
           
-          src = ./oracle_db;
+          src = ./vibe_db;
           
           nativeBuildInputs = [ elixir erlang pkgs.git ];
           
@@ -47,40 +47,40 @@
           
           installPhase = ''
             mkdir -p $out/bin
-            cp oracle_db $out/bin/oracle_db
+            cp vibe_db $out/bin/vibe_db
             
             # Create a wrapper script that sets up the Erlang environment
-            mv $out/bin/oracle_db $out/bin/.oracle_db-wrapped
-            cat > $out/bin/oracle_db << 'EOF'
+            mv $out/bin/vibe_db $out/bin/.vibe_db-wrapped
+            cat > $out/bin/vibe_db << 'EOF'
 #!/bin/sh
-exec "${erlang}/bin/escript" "$(dirname "$0")/.oracle_db-wrapped" "$@"
+exec "${erlang}/bin/escript" "$(dirname "$0")/.vibe_db-wrapped" "$@"
 EOF
-            chmod +x $out/bin/oracle_db
-            substituteInPlace $out/bin/oracle_db --replace '"${erlang}' '"${erlang}'
+            chmod +x $out/bin/vibe_db
+            substituteInPlace $out/bin/vibe_db --replace '"${erlang}' '"${erlang}'
           '';
           
           meta = with pkgs.lib; {
-            description = "An in-memory Oracle SQL-compatible database REPL";
+            description = "An in-memory VibeDb SQL-compatible database REPL";
             homepage = "https://github.com/vibecoding-inc/database";
             license = licenses.mit;
-            mainProgram = "oracle_db";
+            mainProgram = "vibe_db";
           };
         };
       in
       {
         packages = {
-          default = oracle_db;
-          oracle_db = oracle_db;
+          default = vibe_db;
+          vibe_db = vibe_db;
         };
         
         apps = {
           default = {
             type = "app";
-            program = "${oracle_db}/bin/oracle_db";
+            program = "${vibe_db}/bin/vibe_db";
           };
-          oracle_db = {
+          vibe_db = {
             type = "app";
-            program = "${oracle_db}/bin/oracle_db";
+            program = "${vibe_db}/bin/vibe_db";
           };
         };
         
@@ -99,9 +99,9 @@ EOF
             
             mkdir -p $MIX_HOME $HEX_HOME
             
-            echo "OracleDb development shell"
-            echo "Run 'cd oracle_db && mix deps.get && mix compile' to build"
-            echo "Run 'mix escript.build && ./oracle_db' to start the REPL"
+            echo "VibeDb development shell"
+            echo "Run 'cd vibe_db && mix deps.get && mix compile' to build"
+            echo "Run 'mix escript.build && ./vibe_db' to start the REPL"
           '';
         };
       }

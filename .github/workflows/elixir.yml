@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: oracle_db
+        working-directory: vibe_db
 
     steps:
       - name: Checkout repository
@@ -29,8 +29,8 @@ jobs:
       - name: Restore build cache
         uses: actions/cache@v4
         with:
-          path: oracle_db/_build
-          key: ${{ runner.os }}-build-${{ hashFiles('oracle_db/mix.exs') }}
+          path: vibe_db/_build
+          key: ${{ runner.os }}-build-${{ hashFiles('vibe_db/mix.exs') }}
           restore-keys: ${{ runner.os }}-build-
 
       - name: Compile
@@ -45,6 +45,6 @@ jobs:
       - name: Upload compiled artifact
         uses: actions/upload-artifact@v4
         with:
-          name: oracle_db-escript
-          path: oracle_db/oracle_db
+          name: vibe_db-escript
+          path: vibe_db/vibe_db
           retention-days: 7

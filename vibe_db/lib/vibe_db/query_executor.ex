@@ -1,11 +1,11 @@
-defmodule OracleDb.QueryExecutor do
+defmodule VibeDb.QueryExecutor do
   @moduledoc """
   Executes parsed SQL statements against the storage engine.
   """
 
-  alias OracleDb.SqlParser
-  alias OracleDb.Storage
-  alias OracleDb.PlsqlInterpreter
+  alias VibeDb.SqlParser
+  alias VibeDb.Storage
+  alias VibeDb.PlsqlInterpreter
 
   @type result :: {:ok, any()} | {:error, String.t()}
 

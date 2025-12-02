@@ -1,6 +1,6 @@
-defmodule OracleDb.XmlStorage do
+defmodule VibeDb.XmlStorage do
   @moduledoc """
-  XML persistence layer for the Oracle-compatible database.
+  XML persistence layer for the VibeDb database.
   Handles serializing and deserializing the complete database state to/from XML files.
   
   Complex data structures are serialized using Erlang's binary format encoded as base64,

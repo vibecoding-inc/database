@@ -1,38 +1,38 @@
-defmodule OracleDb do
+defmodule VibeDb do
   @moduledoc """
-  An Oracle SQL-compatible relational database implemented in Elixir.
+  A VibeDb SQL-compatible relational database implemented in Elixir.
 
-  This module provides a simple in-memory database that supports Oracle SQL syntax
+  This module provides a simple in-memory database that supports VibeDb SQL syntax
   including:
 
   - DDL: CREATE TABLE, DROP TABLE, ALTER TABLE, CREATE INDEX, CREATE SEQUENCE
   - DML: SELECT, INSERT, UPDATE, DELETE
-  - Oracle-specific features: DUAL table, ROWNUM, NVL, NVL2, DECODE, SYSDATE, sequences
+  - VibeDb-specific features: DUAL table, ROWNUM, NVL, NVL2, DECODE, SYSDATE, sequences
 
   ## Examples
 
       # Start the database
-      {:ok, db} = OracleDb.start_link()
+      {:ok, db} = VibeDb.start_link()
 
       # Create a table
-      OracleDb.execute(db, "CREATE TABLE users (id NUMBER PRIMARY KEY, name VARCHAR2(100), email VARCHAR2(255))")
+      VibeDb.execute(db, "CREATE TABLE users (id NUMBER PRIMARY KEY, name VARCHAR2(100), email VARCHAR2(255))")
 
       # Insert data
-      OracleDb.execute(db, "INSERT INTO users (id, name, email) VALUES (1, 'John Doe', 'john@example.com')")
+      VibeDb.execute(db, "INSERT INTO users (id, name, email) VALUES (1, 'John Doe', 'john@example.com')")
 
       # Query data
-      OracleDb.execute(db, "SELECT * FROM users WHERE id = 1")
+      VibeDb.execute(db, "SELECT * FROM users WHERE id = 1")
 
-      # Use Oracle-specific features
-      OracleDb.execute(db, "SELECT SYSDATE FROM DUAL")
-      OracleDb.execute(db, "SELECT NVL(email, 'no email') FROM users")
+      # Use VibeDb-specific features
+      VibeDb.execute(db, "SELECT SYSDATE FROM DUAL")
+      VibeDb.execute(db, "SELECT NVL(email, 'no email') FROM users")
 
   """
 
   use GenServer
 
-  alias OracleDb.Storage
-  alias OracleDb.QueryExecutor
+  alias VibeDb.Storage
+  alias VibeDb.QueryExecutor
 
   @type server :: GenServer.server()
   @type result :: {:ok, any()} | {:error, String.t()}
@@ -40,7 +40,7 @@ defmodule OracleDb do
   # Client API
 
   @doc """
-  Starts the OracleDb database server.
+  Starts the VibeDb database server.
 
   ## Options
 
@@ -48,8 +48,8 @@ defmodule OracleDb do
 
   ## Examples
 
-      {:ok, db} = OracleDb.start_link()
-      {:ok, db} = OracleDb.start_link(name: :my_database)
+      {:ok, db} = VibeDb.start_link()
+      {:ok, db} = VibeDb.start_link(name: :my_database)
 
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -61,18 +61,18 @@ defmodule OracleDb do
   @doc """
   Executes an SQL statement.
 
-  Supports Oracle SQL syntax including:
+  Supports VibeDb SQL syntax including:
   - SELECT, INSERT, UPDATE, DELETE
   - CREATE TABLE, DROP TABLE, ALTER TABLE
   - CREATE INDEX, DROP INDEX
   - CREATE SEQUENCE, DROP SEQUENCE
-  - Oracle functions: NVL, NVL2, DECODE, SYSDATE, ROWNUM, etc.
+  - VibeDb functions: NVL, NVL2, DECODE, SYSDATE, ROWNUM, etc.
 
   ## Examples
 
-      OracleDb.execute(db, "CREATE TABLE test (id NUMBER, name VARCHAR2(50))")
-      OracleDb.execute(db, "INSERT INTO test VALUES (1, 'hello')")
-      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM test")
+      VibeDb.execute(db, "CREATE TABLE test (id NUMBER, name VARCHAR2(50))")
+      VibeDb.execute(db, "INSERT INTO test VALUES (1, 'hello')")
+      {:ok, rows} = VibeDb.execute(db, "SELECT * FROM test")
 
   """
   @spec execute(server(), String.t()) :: result()
@@ -85,7 +85,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      tables = OracleDb.list_tables(db)
+      tables = VibeDb.list_tables(db)
 
   """
   @spec list_tables(server()) :: [String.t()]
@@ -98,7 +98,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      {:ok, schema} = OracleDb.get_schema(db, "users")
+      {:ok, schema} = VibeDb.get_schema(db, "users")
 
   """
   @spec get_schema(server(), String.t()) :: {:ok, map()} | {:error, String.t()}
@@ -111,7 +111,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      true = OracleDb.table_exists?(db, "users")
+      true = VibeDb.table_exists?(db, "users")
 
   """
   @spec table_exists?(server(), String.t()) :: boolean()
@@ -124,9 +124,9 @@ defmodule OracleDb do
 
   ## Examples
 
-      {:ok, _} = OracleDb.execute(db, "CREATE SEQUENCE my_seq START WITH 1")
-      {:ok, 1} = OracleDb.nextval(db, "my_seq")
-      {:ok, 2} = OracleDb.nextval(db, "my_seq")
+      {:ok, _} = VibeDb.execute(db, "CREATE SEQUENCE my_seq START WITH 1")
+      {:ok, 1} = VibeDb.nextval(db, "my_seq")
+      {:ok, 2} = VibeDb.nextval(db, "my_seq")
 
   """
   @spec nextval(server(), String.t()) :: {:ok, integer()} | {:error, String.t()}
@@ -139,8 +139,8 @@ defmodule OracleDb do
 
   ## Examples
 
-      {:ok, 1} = OracleDb.nextval(db, "my_seq")
-      {:ok, 1} = OracleDb.currval(db, "my_seq")
+      {:ok, 1} = VibeDb.nextval(db, "my_seq")
+      {:ok, 1} = VibeDb.currval(db, "my_seq")
 
   """
   @spec currval(server(), String.t()) :: {:ok, integer()} | {:error, String.t()}
@@ -153,7 +153,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      :ok = OracleDb.reset(db)
+      :ok = VibeDb.reset(db)
 
   """
   @spec reset(server()) :: :ok
@@ -166,7 +166,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      types = OracleDb.list_types(db)
+      types = VibeDb.list_types(db)
 
   """
   @spec list_types(server()) :: [String.t()]
@@ -179,7 +179,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      views = OracleDb.list_views(db)
+      views = VibeDb.list_views(db)
 
   """
   @spec list_views(server()) :: [String.t()]
@@ -192,7 +192,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      sequences = OracleDb.list_sequences(db)
+      sequences = VibeDb.list_sequences(db)
 
   """
   @spec list_sequences(server()) :: [String.t()]
@@ -205,7 +205,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      procedures = OracleDb.list_procedures(db)
+      procedures = VibeDb.list_procedures(db)
 
   """
   @spec list_procedures(server()) :: [String.t()]
@@ -218,7 +218,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      functions = OracleDb.list_functions(db)
+      functions = VibeDb.list_functions(db)
 
   """
   @spec list_functions(server()) :: [String.t()]
@@ -231,7 +231,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      packages = OracleDb.list_packages(db)
+      packages = VibeDb.list_packages(db)
 
   """
   @spec list_packages(server()) :: [String.t()]
@@ -244,7 +244,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      triggers = OracleDb.list_triggers(db)
+      triggers = VibeDb.list_triggers(db)
 
   """
   @spec list_triggers(server()) :: [String.t()]
@@ -257,12 +257,12 @@ defmodule OracleDb do
 
   ## Examples
 
-      :ok = OracleDb.save(db)
-      :ok = OracleDb.save(db, "mydb.xml")
+      :ok = VibeDb.save(db)
+      :ok = VibeDb.save(db, "mydb.xml")
 
   """
   @spec save(server(), String.t()) :: :ok | {:error, String.t()}
-  def save(server, filename \\ OracleDb.XmlStorage.default_filename()) do
+  def save(server, filename \\ VibeDb.XmlStorage.default_filename()) do
     GenServer.call(server, {:save, filename})
   end
 
@@ -271,12 +271,12 @@ defmodule OracleDb do
 
   ## Examples
 
-      :ok = OracleDb.load(db)
-      :ok = OracleDb.load(db, "mydb.xml")
+      :ok = VibeDb.load(db)
+      :ok = VibeDb.load(db, "mydb.xml")
 
   """
   @spec load(server(), String.t()) :: :ok | {:error, String.t()}
-  def load(server, filename \\ OracleDb.XmlStorage.default_filename()) do
+  def load(server, filename \\ VibeDb.XmlStorage.default_filename()) do
     GenServer.call(server, {:load, filename})
   end
 
@@ -285,7 +285,7 @@ defmodule OracleDb do
 
   ## Examples
 
-      status = OracleDb.status(db)
+      status = VibeDb.status(db)
 
   """
   @spec status(server()) :: map()
@@ -395,13 +395,13 @@ defmodule OracleDb do
   @impl true
   def handle_call({:save, filename}, _from, state) do
     db_state = Storage.get_state(state.storage)
-    result = OracleDb.XmlStorage.save(db_state, filename)
+    result = VibeDb.XmlStorage.save(db_state, filename)
     {:reply, result, state}
   end
 
   @impl true
   def handle_call({:load, filename}, _from, state) do
-    case OracleDb.XmlStorage.load(filename) do
+    case VibeDb.XmlStorage.load(filename) do
       {:ok, new_db_state} ->
         Storage.set_state(state.storage, new_db_state)
         {:reply, :ok, state}

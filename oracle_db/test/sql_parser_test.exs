@@ -529,4 +529,574 @@ defmodule OracleDb.SqlParserTest do
       assert "<>" in tokens
     end
   end
+
+  describe "PL/SQL anonymous blocks" do
+    test "parses simple BEGIN/END block" do
+      sql = "BEGIN END;"
+      assert {:anonymous_block, %{body: _}} = SqlParser.parse(sql)
+    end
+
+    test "parses BEGIN/END block with newlines" do
+      sql = "BEGIN\nEND;"
+      assert {:anonymous_block, %{body: _}} = SqlParser.parse(sql)
+    end
+
+    test "parses BEGIN/END block with NULL statement" do
+      sql = "BEGIN\n  NULL;\nEND;"
+      assert {:anonymous_block, %{body: body}} = SqlParser.parse(sql)
+      assert body =~ "NULL"
+    end
+
+    test "parses BEGIN/END block with DBMS_OUTPUT" do
+      sql = """
+      BEGIN
+        DBMS_OUTPUT.PUT_LINE('Hello World');
+      END;
+      """
+      assert {:anonymous_block, %{body: body}} = SqlParser.parse(sql)
+      assert body =~ "DBMS_OUTPUT"
+    end
+
+    test "parses DECLARE block with variable" do
+      sql = """
+      DECLARE
+        v_count NUMBER := 0;
+      BEGIN
+        v_count := v_count + 1;
+      END;
+      """
+      assert {:anonymous_block, _} = SqlParser.parse(sql)
+    end
+
+    test "parses DECLARE block with multiple variables" do
+      sql = """
+      DECLARE
+        v_name VARCHAR2(100) := 'Test';
+        v_age NUMBER;
+        v_active BOOLEAN := TRUE;
+      BEGIN
+        NULL;
+      END;
+      """
+      assert {:anonymous_block, _} = SqlParser.parse(sql)
+    end
+
+    test "parses block with nested BEGIN/END" do
+      sql = """
+      BEGIN
+        BEGIN
+          NULL;
+        END;
+      END;
+      """
+      assert {:anonymous_block, _} = SqlParser.parse(sql)
+    end
+
+    test "parses block with multiple nested BEGIN/END" do
+      sql = """
+      BEGIN
+        BEGIN
+          NULL;
+        END;
+        BEGIN
+          NULL;
+        END;
+      END;
+      """
+      assert {:anonymous_block, _} = SqlParser.parse(sql)
+    end
+
+    test "parses block with deeply nested BEGIN/END" do
+      sql = """
+      BEGIN
+        BEGIN
+          BEGIN
+            NULL;
+          END;
+        END;
+      END;
+      """
+      assert {:anonymous_block, _} = SqlParser.parse(sql)
+    end
+  end
+
+  describe "PL/SQL procedures - parsing" do
+    test "parses simple procedure without parameters" do
+      sql = """
+      CREATE PROCEDURE simple_proc
+      IS
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_procedure, info} = SqlParser.parse(sql)
+      assert info.name == "simple_proc"
+      assert info.parameters == []
+      assert info.replace == false
+    end
+
+    test "parses procedure with IN parameter" do
+      sql = """
+      CREATE PROCEDURE proc_with_in (p_name IN VARCHAR2)
+      IS
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_procedure, info} = SqlParser.parse(sql)
+      assert info.name == "proc_with_in"
+      assert length(info.parameters) > 0
+    end
+
+    test "parses procedure with OUT parameter" do
+      sql = """
+      CREATE PROCEDURE proc_with_out (p_result OUT NUMBER)
+      IS
+      BEGIN
+        p_result := 42;
+      END;
+      """
+      {:create_procedure, info} = SqlParser.parse(sql)
+      assert info.name == "proc_with_out"
+    end
+
+    test "parses procedure with IN OUT parameter" do
+      sql = """
+      CREATE PROCEDURE proc_with_inout (p_value IN OUT NUMBER)
+      IS
+      BEGIN
+        p_value := p_value + 1;
+      END;
+      """
+      {:create_procedure, info} = SqlParser.parse(sql)
+      assert info.name == "proc_with_inout"
+    end
+
+    test "parses procedure with multiple parameters" do
+      sql = """
+      CREATE PROCEDURE multi_param_proc (
+        p_id IN NUMBER,
+        p_name IN VARCHAR2,
+        p_result OUT NUMBER
+      )
+      IS
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_procedure, info} = SqlParser.parse(sql)
+      assert info.name == "multi_param_proc"
+    end
+
+    test "parses CREATE OR REPLACE PROCEDURE" do
+      sql = """
+      CREATE OR REPLACE PROCEDURE replace_proc
+      IS
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_procedure, info} = SqlParser.parse(sql)
+      assert info.name == "replace_proc"
+      assert info.replace == true
+    end
+
+    test "parses procedure with AS instead of IS" do
+      sql = """
+      CREATE PROCEDURE as_proc
+      AS
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_procedure, info} = SqlParser.parse(sql)
+      assert info.name == "as_proc"
+    end
+
+    test "parses procedure with local variable declarations" do
+      sql = """
+      CREATE PROCEDURE local_vars_proc
+      IS
+        v_count NUMBER := 0;
+        v_name VARCHAR2(100);
+      BEGIN
+        v_name := 'Test';
+        v_count := v_count + 1;
+      END;
+      """
+      {:create_procedure, info} = SqlParser.parse(sql)
+      assert info.name == "local_vars_proc"
+    end
+
+    test "parses procedure with END proc_name;" do
+      sql = """
+      CREATE PROCEDURE named_end_proc
+      IS
+      BEGIN
+        NULL;
+      END named_end_proc;
+      """
+      {:create_procedure, info} = SqlParser.parse(sql)
+      assert info.name == "named_end_proc"
+    end
+  end
+
+  describe "PL/SQL functions - parsing" do
+    test "parses simple function" do
+      sql = """
+      CREATE FUNCTION simple_func
+      RETURN NUMBER
+      IS
+      BEGIN
+        RETURN 42;
+      END;
+      """
+      {:create_function, info} = SqlParser.parse(sql)
+      assert info.name == "simple_func"
+      assert info.return_type == "NUMBER"
+      assert info.replace == false
+    end
+
+    test "parses function with parameters" do
+      sql = """
+      CREATE FUNCTION add_func (p_a NUMBER, p_b NUMBER)
+      RETURN NUMBER
+      IS
+      BEGIN
+        RETURN p_a + p_b;
+      END;
+      """
+      {:create_function, info} = SqlParser.parse(sql)
+      assert info.name == "add_func"
+      assert info.return_type == "NUMBER"
+    end
+
+    test "parses function returning VARCHAR2" do
+      sql = """
+      CREATE FUNCTION string_func (p_name VARCHAR2)
+      RETURN VARCHAR2
+      IS
+      BEGIN
+        RETURN 'Hello ' || p_name;
+      END;
+      """
+      {:create_function, info} = SqlParser.parse(sql)
+      assert info.name == "string_func"
+      assert info.return_type == "VARCHAR2"
+    end
+
+    test "parses CREATE OR REPLACE FUNCTION" do
+      sql = """
+      CREATE OR REPLACE FUNCTION replace_func
+      RETURN NUMBER
+      IS
+      BEGIN
+        RETURN 0;
+      END;
+      """
+      {:create_function, info} = SqlParser.parse(sql)
+      assert info.name == "replace_func"
+      assert info.replace == true
+    end
+
+    test "parses function with local variables" do
+      sql = """
+      CREATE FUNCTION compute_func (p_x NUMBER)
+      RETURN NUMBER
+      IS
+        v_result NUMBER;
+      BEGIN
+        v_result := p_x * 2;
+        RETURN v_result;
+      END;
+      """
+      {:create_function, info} = SqlParser.parse(sql)
+      assert info.name == "compute_func"
+    end
+  end
+
+  describe "PL/SQL triggers - parsing" do
+    test "parses BEFORE INSERT trigger" do
+      sql = """
+      CREATE TRIGGER before_insert_trig
+      BEFORE INSERT ON test_table
+      FOR EACH ROW
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_trigger, info} = SqlParser.parse(sql)
+      assert info.name == "before_insert_trig"
+      assert info.timing == :before
+      assert info.table == "test_table"
+      assert info.for_each == :row
+    end
+
+    test "parses AFTER UPDATE trigger" do
+      sql = """
+      CREATE TRIGGER after_update_trig
+      AFTER UPDATE ON test_table
+      FOR EACH ROW
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_trigger, info} = SqlParser.parse(sql)
+      assert info.name == "after_update_trig"
+      assert info.timing == :after
+    end
+
+    test "parses INSTEAD OF trigger" do
+      sql = """
+      CREATE TRIGGER instead_of_trig
+      INSTEAD OF INSERT ON test_view
+      FOR EACH ROW
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_trigger, info} = SqlParser.parse(sql)
+      assert info.name == "instead_of_trig"
+      assert info.timing == :instead_of
+    end
+
+    test "parses trigger with multiple events" do
+      sql = """
+      CREATE TRIGGER multi_event_trig
+      BEFORE INSERT OR UPDATE OR DELETE ON test_table
+      FOR EACH ROW
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_trigger, info} = SqlParser.parse(sql)
+      assert info.name == "multi_event_trig"
+      assert length(info.events) == 3
+    end
+
+    test "parses CREATE OR REPLACE TRIGGER" do
+      sql = """
+      CREATE OR REPLACE TRIGGER replace_trig
+      BEFORE INSERT ON test_table
+      FOR EACH ROW
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_trigger, info} = SqlParser.parse(sql)
+      assert info.replace == true
+    end
+
+    test "parses trigger with WHEN clause" do
+      sql = """
+      CREATE TRIGGER when_trig
+      BEFORE INSERT ON test_table
+      FOR EACH ROW
+      WHEN (NEW.id > 0)
+      BEGIN
+        NULL;
+      END;
+      """
+      {:create_trigger, info} = SqlParser.parse(sql)
+      assert info.when_clause != nil
+    end
+  end
+
+  describe "PL/SQL packages - parsing" do
+    test "parses package specification" do
+      sql = """
+      CREATE PACKAGE test_pkg
+      IS
+        PROCEDURE proc1;
+        FUNCTION func1 RETURN NUMBER;
+      END;
+      """
+      {:create_package, info} = SqlParser.parse(sql)
+      assert info.name == "test_pkg"
+      assert info.replace == false
+    end
+
+    test "parses CREATE OR REPLACE PACKAGE" do
+      sql = """
+      CREATE OR REPLACE PACKAGE replace_pkg
+      IS
+        PROCEDURE proc1;
+      END;
+      """
+      {:create_package, info} = SqlParser.parse(sql)
+      assert info.replace == true
+    end
+
+    test "parses package body" do
+      sql = """
+      CREATE PACKAGE BODY test_pkg
+      IS
+        PROCEDURE proc1
+        IS
+        BEGIN
+          NULL;
+        END;
+      END;
+      """
+      {:create_package_body, info} = SqlParser.parse(sql)
+      assert info.name == "test_pkg"
+    end
+  end
+
+  describe "PL/SQL block completeness detection" do
+    test "incomplete: BEGIN without END" do
+      assert not SqlParser.plsql_block_complete?("BEGIN")
+    end
+
+    test "incomplete: BEGIN NULL; without END" do
+      assert not SqlParser.plsql_block_complete?("BEGIN NULL;")
+    end
+
+    test "complete: BEGIN END;" do
+      assert SqlParser.plsql_block_complete?("BEGIN END;")
+    end
+
+    test "complete: BEGIN with newline END;" do
+      assert SqlParser.plsql_block_complete?("BEGIN\nEND;")
+    end
+
+    test "incomplete: nested BEGIN without matching END" do
+      assert not SqlParser.plsql_block_complete?("BEGIN BEGIN END; ")
+    end
+
+    test "complete: nested BEGIN with matching END" do
+      assert SqlParser.plsql_block_complete?("BEGIN BEGIN END; END;")
+    end
+
+    test "incomplete: DECLARE without END" do
+      assert not SqlParser.plsql_block_complete?("DECLARE v NUMBER; BEGIN")
+    end
+
+    test "complete: DECLARE with BEGIN and END" do
+      assert SqlParser.plsql_block_complete?("DECLARE v NUMBER; BEGIN END;")
+    end
+
+    test "incomplete: CREATE PROCEDURE without END" do
+      assert not SqlParser.plsql_block_complete?("CREATE PROCEDURE p IS BEGIN")
+    end
+
+    test "complete: CREATE PROCEDURE with END" do
+      assert SqlParser.plsql_block_complete?("CREATE PROCEDURE p IS BEGIN END;")
+    end
+
+    test "complete: END with procedure name" do
+      assert SqlParser.plsql_block_complete?("CREATE PROCEDURE p IS BEGIN END p;")
+    end
+  end
+
+  describe "PL/SQL is_plsql_block? detection" do
+    test "BEGIN is PL/SQL block" do
+      assert SqlParser.is_plsql_block?("BEGIN NULL; END;")
+    end
+
+    test "DECLARE is PL/SQL block" do
+      assert SqlParser.is_plsql_block?("DECLARE v NUMBER; BEGIN END;")
+    end
+
+    test "CREATE PROCEDURE is PL/SQL block" do
+      assert SqlParser.is_plsql_block?("CREATE PROCEDURE p IS BEGIN END;")
+    end
+
+    test "CREATE OR REPLACE PROCEDURE is PL/SQL block" do
+      assert SqlParser.is_plsql_block?("CREATE OR REPLACE PROCEDURE p IS BEGIN END;")
+    end
+
+    test "CREATE FUNCTION is PL/SQL block" do
+      assert SqlParser.is_plsql_block?("CREATE FUNCTION f RETURN NUMBER IS BEGIN RETURN 1; END;")
+    end
+
+    test "CREATE TRIGGER is PL/SQL block" do
+      assert SqlParser.is_plsql_block?("CREATE TRIGGER t BEFORE INSERT ON tbl BEGIN END;")
+    end
+
+    test "CREATE PACKAGE is PL/SQL block" do
+      assert SqlParser.is_plsql_block?("CREATE PACKAGE pkg IS END;")
+    end
+
+    test "SELECT is not PL/SQL block" do
+      assert not SqlParser.is_plsql_block?("SELECT * FROM dual")
+    end
+
+    test "INSERT is not PL/SQL block" do
+      assert not SqlParser.is_plsql_block?("INSERT INTO t VALUES (1)")
+    end
+
+    test "UPDATE is not PL/SQL block" do
+      assert not SqlParser.is_plsql_block?("UPDATE t SET x = 1")
+    end
+
+    test "DELETE is not PL/SQL block" do
+      assert not SqlParser.is_plsql_block?("DELETE FROM t")
+    end
+
+    test "CREATE TABLE is not PL/SQL block" do
+      assert not SqlParser.is_plsql_block?("CREATE TABLE t (id NUMBER)")
+    end
+
+    test "CREATE VIEW is not PL/SQL block" do
+      assert not SqlParser.is_plsql_block?("CREATE VIEW v AS SELECT * FROM t")
+    end
+  end
+
+  describe "PL/SQL error messages" do
+    test "incomplete procedure gives clear error" do
+      sql = "CREATE PROCEDURE p IS BEGIN"
+      {:error, msg} = SqlParser.parse(sql)
+      assert msg =~ "END"
+    end
+
+    test "incomplete function gives clear error" do
+      sql = "CREATE FUNCTION f RETURN NUMBER IS BEGIN"
+      {:error, msg} = SqlParser.parse(sql)
+      assert msg =~ "END"
+    end
+
+    test "incomplete anonymous block gives clear error" do
+      sql = "BEGIN NULL;"
+      {:error, msg} = SqlParser.parse(sql)
+      assert msg =~ "END"
+    end
+
+    test "unbalanced nested blocks gives clear error" do
+      sql = "BEGIN BEGIN END;"
+      {:error, msg} = SqlParser.parse(sql)
+      assert msg =~ "END" or msg =~ "Unbalanced"
+    end
+  end
+
+  describe "PL/SQL with string literals" do
+    test "string literal does not confuse BEGIN detection" do
+      sql = """
+      BEGIN
+        DBMS_OUTPUT.PUT_LINE('BEGIN is just a string');
+      END;
+      """
+      assert {:anonymous_block, _} = SqlParser.parse(sql)
+    end
+
+    test "string literal does not confuse END detection" do
+      sql = """
+      BEGIN
+        DBMS_OUTPUT.PUT_LINE('This is not the END');
+      END;
+      """
+      assert {:anonymous_block, _} = SqlParser.parse(sql)
+    end
+
+    test "multiple string literals handled correctly" do
+      sql = """
+      BEGIN
+        DBMS_OUTPUT.PUT_LINE('First');
+        DBMS_OUTPUT.PUT_LINE('Second');
+        DBMS_OUTPUT.PUT_LINE('Third');
+      END;
+      """
+      assert {:anonymous_block, _} = SqlParser.parse(sql)
+    end
+  end
 end

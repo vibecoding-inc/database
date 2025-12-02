@@ -171,6 +171,146 @@ defmodule OracleDb.Repl do
     :continue
   end
 
+  defp process_input(db, ".sequences") do
+    sequences = OracleDb.list_sequences(db)
+
+    if length(sequences) == 0 do
+      IO.puts("No sequences.")
+    else
+      IO.puts("Sequences:")
+      Enum.each(sequences, fn seq -> IO.puts("  #{seq}") end)
+    end
+
+    :continue
+  end
+
+  defp process_input(db, ".procedures") do
+    procedures = OracleDb.list_procedures(db)
+
+    if length(procedures) == 0 do
+      IO.puts("No stored procedures.")
+    else
+      IO.puts("Stored Procedures:")
+      Enum.each(procedures, fn proc -> IO.puts("  #{proc}") end)
+    end
+
+    :continue
+  end
+
+  defp process_input(db, ".functions") do
+    functions = OracleDb.list_functions(db)
+
+    if length(functions) == 0 do
+      IO.puts("No stored functions.")
+    else
+      IO.puts("Stored Functions:")
+      Enum.each(functions, fn func -> IO.puts("  #{func}") end)
+    end
+
+    :continue
+  end
+
+  defp process_input(db, ".packages") do
+    packages = OracleDb.list_packages(db)
+
+    if length(packages) == 0 do
+      IO.puts("No packages.")
+    else
+      IO.puts("Packages:")
+      Enum.each(packages, fn pkg -> IO.puts("  #{pkg}") end)
+    end
+
+    :continue
+  end
+
+  defp process_input(db, ".triggers") do
+    triggers = OracleDb.list_triggers(db)
+
+    if length(triggers) == 0 do
+      IO.puts("No triggers.")
+    else
+      IO.puts("Triggers:")
+      Enum.each(triggers, fn trig -> IO.puts("  #{trig}") end)
+    end
+
+    :continue
+  end
+
+  defp process_input(db, ".status") do
+    status = OracleDb.status(db)
+
+    IO.puts("Database Status:")
+    IO.puts("  Tables:             #{status.tables}")
+    IO.puts("  Total rows:         #{status.total_rows}")
+    IO.puts("  Sequences:          #{status.sequences}")
+    IO.puts("  Indexes:            #{status.indexes}")
+    IO.puts("  Types:              #{status.types}")
+    IO.puts("  Views:              #{status.views}")
+    IO.puts("  Materialized Views: #{status.materialized_views}")
+    IO.puts("  Procedures:         #{status.procedures}")
+    IO.puts("  Functions:          #{status.functions}")
+    IO.puts("  Packages:           #{status.packages}")
+    IO.puts("  Triggers:           #{status.triggers}")
+
+    :continue
+  end
+
+  defp process_input(db, ".save " <> filename) do
+    filename = String.trim(filename)
+
+    case OracleDb.save(db, filename) do
+      :ok ->
+        IO.puts("Database saved to #{filename}")
+
+      {:error, reason} ->
+        IO.puts("Error: #{reason}")
+    end
+
+    :continue
+  end
+
+  defp process_input(db, ".save") do
+    filename = OracleDb.XmlStorage.default_filename()
+
+    case OracleDb.save(db, filename) do
+      :ok ->
+        IO.puts("Database saved to #{filename}")
+
+      {:error, reason} ->
+        IO.puts("Error: #{reason}")
+    end
+
+    :continue
+  end
+
+  defp process_input(db, ".load " <> filename) do
+    filename = String.trim(filename)
+
+    case OracleDb.load(db, filename) do
+      :ok ->
+        IO.puts("Database loaded from #{filename}")
+
+      {:error, reason} ->
+        IO.puts("Error: #{reason}")
+    end
+
+    :continue
+  end
+
+  defp process_input(db, ".load") do
+    filename = OracleDb.XmlStorage.default_filename()
+
+    case OracleDb.load(db, filename) do
+      :ok ->
+        IO.puts("Database loaded from #{filename}")
+
+      {:error, reason} ->
+        IO.puts("Error: #{reason}")
+    end
+
+    :continue
+  end
+
   defp process_input(_db, "." <> cmd) do
     IO.puts("Unknown command: .#{cmd}")
     IO.puts("Type .help for available commands.")
@@ -326,6 +466,14 @@ defmodule OracleDb.Repl do
       .schema <table>    Show table schema
       .types             List all user-defined types
       .views             List all views
+      .sequences         List all sequences
+      .procedures        List all stored procedures
+      .functions         List all stored functions
+      .packages          List all packages
+      .triggers          List all triggers
+      .status            Show database status
+      .save [filename]   Save database to XML file (default: database.xml)
+      .load [filename]   Load database from XML file (default: database.xml)
       .clear             Clear the screen
       .exit, .quit       Exit the REPL
 
@@ -337,6 +485,8 @@ defmodule OracleDb.Repl do
       INSERT INTO users VALUES (1, 'Alice');
       SELECT * FROM users;
       SELECT SYSDATE FROM DUAL;
+      .save mydb.xml
+      .load mydb.xml
     """)
   end
 end

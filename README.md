@@ -134,6 +134,9 @@ oracle> .tables
 Tables:
   USERS
 
+oracle> .save mydb.xml
+Database saved to mydb.xml
+
 oracle> .exit
 Goodbye!
 ```
@@ -145,8 +148,54 @@ Goodbye!
 - `.schema <table>` - Show table schema
 - `.types` - List all user-defined types
 - `.views` - List all views
+- `.sequences` - List all sequences
+- `.procedures` - List all stored procedures
+- `.functions` - List all stored functions
+- `.packages` - List all packages
+- `.triggers` - List all triggers
+- `.status` - Show database status (counts of tables, rows, etc.)
+- `.save [filename]` - Save database to XML file (default: database.xml)
+- `.load [filename]` - Load database from XML file (default: database.xml)
 - `.clear` - Clear the screen
 - `.exit` or `.quit` - Exit the REPL
+
+### XML Persistence
+
+The database supports saving and loading the complete database state to/from XML files. This includes:
+
+- Tables (schema and data)
+- Sequences
+- Indexes
+- User-defined types (object types, nested tables, VARRAYs)
+- Views and materialized views
+- Stored procedures and functions
+- Packages
+- Triggers
+
+Example XML storage usage:
+```bash
+oracle> CREATE TABLE users (id NUMBER, name VARCHAR2(100));
+OK: Table USERS created
+
+oracle> INSERT INTO users VALUES (1, 'Alice');
+OK: 1 row(s) affected
+
+oracle> .save
+Database saved to database.xml
+
+oracle> .exit
+Goodbye!
+
+# Later, restart the REPL and load the database:
+oracle> .load
+Database loaded from database.xml
+
+oracle> SELECT * FROM users;
+| ID | NAME  |
++----+-------+
+| 1  | Alice |
+1 row(s) returned
+```
 
 ## Programmatic Usage
 

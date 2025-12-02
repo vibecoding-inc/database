@@ -24,6 +24,8 @@ An in-memory relational database implemented in Elixir that is compatible with O
 - `CREATE TABLE ... OF type_name` - Create object tables based on object types
 - `CREATE VIEW` - Create views with SELECT queries
 - `CREATE OR REPLACE VIEW` - Create or replace existing views
+- `CREATE VIEW ... OF type_name` - Create object views based on object types
+- `CREATE VIEW ... OF type_name WITH OBJECT IDENTIFIER` - Object views with OID specification
 - `DROP VIEW` - Remove views
 - `CREATE MATERIALIZED VIEW` - Create materialized views
 - `DROP MATERIALIZED VIEW` - Remove materialized views
@@ -184,12 +186,45 @@ OracleDb.execute(db, "CREATE MATERIALIZED VIEW user_counts AS SELECT status, COU
 OracleDb.execute(db, "DROP MATERIALIZED VIEW user_counts")
 ```
 
+### Object-Relational Views
+
+```elixir
+# Create an object type for the view
+OracleDb.execute(db, """
+  CREATE TYPE employee_view_t AS OBJECT (
+    emp_id NUMBER,
+    emp_name VARCHAR2(100),
+    emp_email VARCHAR2(200)
+  )
+""")
+
+# Create an object view based on a type
+OracleDb.execute(db, """
+  CREATE VIEW employee_view OF employee_view_t AS
+  SELECT employee_id, employee_name, employee_email FROM employees
+""")
+
+# Create an object view with OBJECT IDENTIFIER (OID)
+OracleDb.execute(db, """
+  CREATE VIEW employee_oid_view OF employee_view_t
+  WITH OBJECT IDENTIFIER (emp_id) AS
+  SELECT employee_id, employee_name, employee_email FROM employees
+""")
+
+# Create or replace an object view
+OracleDb.execute(db, """
+  CREATE OR REPLACE VIEW employee_view OF employee_view_t AS
+  SELECT employee_id, employee_name, employee_email FROM employees WHERE active = 1
+""")
+```
+
 ## Running Tests
 
 ```bash
 cd oracle_db
 mix test
 ```
+
 
 ## Project Structure
 

@@ -705,4 +705,79 @@ defmodule OracleDbTest do
       assert {:error, _} = result
     end
   end
+
+  describe "Object-Relational Views" do
+    setup %{db: db} do
+      # Create a base type for object views
+      OracleDb.execute(
+        db,
+        "CREATE TYPE person_view_t AS OBJECT (id NUMBER, name VARCHAR2(100), email VARCHAR2(200))"
+      )
+
+      # Create a base table
+      OracleDb.execute(
+        db,
+        "CREATE TABLE persons_base (person_id NUMBER, person_name VARCHAR2(100), person_email VARCHAR2(200))"
+      )
+
+      OracleDb.execute(db, "INSERT INTO persons_base VALUES (1, 'Alice', 'alice@test.com')")
+      OracleDb.execute(db, "INSERT INTO persons_base VALUES (2, 'Bob', 'bob@test.com')")
+      :ok
+    end
+
+    test "CREATE VIEW OF type_name creates object view", %{db: db} do
+      result =
+        OracleDb.execute(
+          db,
+          "CREATE VIEW person_view OF person_view_t AS SELECT person_id, person_name, person_email FROM persons_base"
+        )
+
+      assert {:ok, %{message: "View PERSON_VIEW created"}} = result
+    end
+
+    test "CREATE VIEW OF type_name WITH OBJECT IDENTIFIER", %{db: db} do
+      result =
+        OracleDb.execute(
+          db,
+          "CREATE VIEW person_oid_view OF person_view_t WITH OBJECT IDENTIFIER (id) AS SELECT person_id, person_name, person_email FROM persons_base"
+        )
+
+      assert {:ok, %{message: "View PERSON_OID_VIEW created"}} = result
+    end
+
+    test "CREATE OR REPLACE VIEW OF type_name", %{db: db} do
+      OracleDb.execute(
+        db,
+        "CREATE VIEW replace_view OF person_view_t AS SELECT person_id, person_name, person_email FROM persons_base"
+      )
+
+      result =
+        OracleDb.execute(
+          db,
+          "CREATE OR REPLACE VIEW replace_view OF person_view_t AS SELECT person_id, person_name, person_email FROM persons_base WHERE person_id > 0"
+        )
+
+      assert {:ok, %{message: "View REPLACE_VIEW created"}} = result
+    end
+
+    test "CREATE VIEW OF with multiple OBJECT IDENTIFIER columns", %{db: db} do
+      result =
+        OracleDb.execute(
+          db,
+          "CREATE VIEW multi_oid_view OF person_view_t WITH OBJECT IDENTIFIER (id, name) AS SELECT person_id, person_name, person_email FROM persons_base"
+        )
+
+      assert {:ok, %{message: "View MULTI_OID_VIEW created"}} = result
+    end
+
+    test "DROP object-relational VIEW", %{db: db} do
+      OracleDb.execute(
+        db,
+        "CREATE VIEW drop_obj_view OF person_view_t AS SELECT person_id, person_name, person_email FROM persons_base"
+      )
+
+      result = OracleDb.execute(db, "DROP VIEW drop_obj_view")
+      assert {:ok, %{message: "View DROP_OBJ_VIEW dropped"}} = result
+    end
+  end
 end

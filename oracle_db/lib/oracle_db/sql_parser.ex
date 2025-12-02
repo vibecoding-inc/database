@@ -739,6 +739,49 @@ defmodule OracleDb.SqlParser do
   # Parse CREATE VIEW statement
   defp parse_create_view(tokens, replace \\ false) do
     case tokens do
+      # Object-relational view: CREATE VIEW name OF type_name WITH OBJECT IDENTIFIER (cols) AS SELECT ...
+      [view_name, "OF", type_name, "WITH", "OBJECT", "IDENTIFIER", "(" | rest] ->
+        {oid_columns, remaining} = parse_view_column_list(rest)
+
+        case remaining do
+          ["AS" | select_rest] ->
+            case parse_select(["SELECT" | select_rest]) do
+              {:select, select_info} ->
+                {:create_view,
+                 %{
+                   name: view_name,
+                   of_type: type_name,
+                   object_identifier: oid_columns,
+                   query: select_info,
+                   replace: replace,
+                   object_view: true
+                 }}
+
+              error ->
+                error
+            end
+
+          _ ->
+            {:error, "Invalid CREATE VIEW OF syntax - expected AS after WITH OBJECT IDENTIFIER"}
+        end
+
+      # Object-relational view without WITH OBJECT IDENTIFIER: CREATE VIEW name OF type_name AS SELECT ...
+      [view_name, "OF", type_name, "AS" | rest] ->
+        case parse_select(["SELECT" | rest]) do
+          {:select, select_info} ->
+            {:create_view,
+             %{
+               name: view_name,
+               of_type: type_name,
+               query: select_info,
+               replace: replace,
+               object_view: true
+             }}
+
+          error ->
+            error
+        end
+
       [view_name, "AS" | rest] ->
         # Parse the SELECT statement that defines the view
         case parse_select(["SELECT" | rest]) do

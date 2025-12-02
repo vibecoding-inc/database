@@ -1232,6 +1232,11 @@ defmodule OracleDb.Storage do
     {:ok, [row]}
   end
 
+  # Handle JOIN queries
+  defp execute_select(state, {:join, base_table, joins}, columns, where, order_by) do
+    execute_join_select(state, base_table, joins, columns, where, order_by)
+  end
+
   defp execute_select(state, table_name, columns, where, order_by) do
     # First check if it's a view
     case Map.fetch(state.views, table_name) do
@@ -1264,6 +1269,227 @@ defmodule OracleDb.Storage do
             end
         end
     end
+  end
+
+  # Execute a JOIN query
+  defp execute_join_select(state, base_table, joins, columns, where, order_by) do
+    # Get base table data
+    case get_table_rows(state, base_table) do
+      {:ok, base_rows} ->
+        # Process each join in sequence
+        case process_joins(state, base_rows, joins) do
+          {:ok, joined_rows} ->
+            # Apply WHERE filter
+            filtered = filter_rows(joined_rows, where)
+
+            # Apply ORDER BY
+            sorted = sort_rows(filtered, order_by)
+
+            # Project columns
+            projected = project_columns(sorted, columns)
+
+            {:ok, projected}
+
+          {:error, _} = err ->
+            err
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # Get rows from a table (handles views, materialized views, and tables)
+  defp get_table_rows(state, table_name) do
+    normalized_name = normalize_name(table_name)
+
+    cond do
+      Map.has_key?(state.views, normalized_name) ->
+        # It's a view, execute its query
+        view_def = state.views[normalized_name]
+        query = Map.get(view_def, :query)
+
+        if query do
+          execute_select(
+            state,
+            normalize_name(Map.get(query, :table)),
+            Map.get(query, :columns),
+            Map.get(query, :where),
+            Map.get(query, :order_by)
+          )
+        else
+          {:error, "View #{normalized_name} has no query"}
+        end
+
+      Map.has_key?(state.materialized_views, normalized_name) ->
+        # It's a materialized view
+        {:ok, Map.get(state.data, normalized_name, [])}
+
+      Map.has_key?(state.data, normalized_name) ->
+        # It's a regular table
+        {:ok, Map.get(state.data, normalized_name, [])}
+
+      true ->
+        {:error, "Table #{table_name} does not exist"}
+    end
+  end
+
+  # Process joins sequentially
+  defp process_joins(_state, rows, []) do
+    {:ok, rows}
+  end
+
+  defp process_joins(state, left_rows, [join | rest]) do
+    case get_table_rows(state, join.table) do
+      {:ok, right_rows} ->
+        # Perform the join
+        joined = execute_single_join(left_rows, right_rows, join)
+        process_joins(state, joined, rest)
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # Execute a single join operation
+  defp execute_single_join(left_rows, right_rows, join) do
+    case join.type do
+      :inner ->
+        inner_join(left_rows, right_rows, join.condition)
+
+      :left_outer ->
+        left_outer_join(left_rows, right_rows, join.condition)
+
+      :right_outer ->
+        right_outer_join(left_rows, right_rows, join.condition)
+
+      :full_outer ->
+        full_outer_join(left_rows, right_rows, join.condition)
+
+      :cross ->
+        cross_join(left_rows, right_rows)
+
+      _ ->
+        # Default to inner join
+        inner_join(left_rows, right_rows, join.condition)
+    end
+  end
+
+  # Inner join - only rows that match the condition
+  defp inner_join(left_rows, right_rows, condition) do
+    for left <- left_rows,
+        right <- right_rows,
+        join_condition_matches?(left, right, condition) do
+      merge_rows(left, right)
+    end
+  end
+
+  # Left outer join - all left rows, matched right rows or NULL
+  defp left_outer_join(left_rows, right_rows, condition) do
+    Enum.flat_map(left_rows, fn left ->
+      matching_rights =
+        Enum.filter(right_rows, fn right ->
+          join_condition_matches?(left, right, condition)
+        end)
+
+      if Enum.empty?(matching_rights) do
+        # No match, return left with NULL values for right columns
+        right_nulls = make_null_row(right_rows)
+        [merge_rows(left, right_nulls)]
+      else
+        Enum.map(matching_rights, fn right -> merge_rows(left, right) end)
+      end
+    end)
+  end
+
+  # Right outer join - all right rows, matched left rows or NULL
+  defp right_outer_join(left_rows, right_rows, condition) do
+    Enum.flat_map(right_rows, fn right ->
+      matching_lefts =
+        Enum.filter(left_rows, fn left ->
+          join_condition_matches?(left, right, condition)
+        end)
+
+      if Enum.empty?(matching_lefts) do
+        # No match, return right with NULL values for left columns
+        left_nulls = make_null_row(left_rows)
+        [merge_rows(left_nulls, right)]
+      else
+        Enum.map(matching_lefts, fn left -> merge_rows(left, right) end)
+      end
+    end)
+  end
+
+  # Full outer join - all rows from both, matched where possible
+  defp full_outer_join(left_rows, right_rows, condition) do
+    left_join_result = left_outer_join(left_rows, right_rows, condition)
+
+    # Find right rows that had no match
+    unmatched_rights =
+      Enum.filter(right_rows, fn right ->
+        not Enum.any?(left_rows, fn left ->
+          join_condition_matches?(left, right, condition)
+        end)
+      end)
+
+    left_nulls = make_null_row(left_rows)
+
+    unmatched_right_rows =
+      Enum.map(unmatched_rights, fn right ->
+        merge_rows(left_nulls, right)
+      end)
+
+    left_join_result ++ unmatched_right_rows
+  end
+
+  # Cross join - cartesian product
+  defp cross_join(left_rows, right_rows) do
+    for left <- left_rows, right <- right_rows do
+      merge_rows(left, right)
+    end
+  end
+
+  # Check if a join condition matches for two rows
+  defp join_condition_matches?(_left_row, _right_row, nil) do
+    # No condition (like CROSS JOIN)
+    true
+  end
+
+  defp join_condition_matches?(left_row, right_row, {:using, columns}) do
+    # USING clause - columns must match in both tables
+    Enum.all?(columns, fn col ->
+      left_val = get_column_value(left_row, col)
+      right_val = get_column_value(right_row, col)
+      left_val == right_val and left_val != nil
+    end)
+  end
+
+  defp join_condition_matches?(left_row, right_row, condition) do
+    # ON clause - evaluate condition with combined row
+    combined_row = merge_rows(left_row, right_row)
+    evaluate_condition(combined_row, condition)
+  end
+
+  # Merge two rows from different tables
+  defp merge_rows(left, right) do
+    # Remove internal columns like __ROWNUM__ before merging
+    left_clean = Map.delete(left, "__ROWNUM__")
+    right_clean = Map.delete(right, "__ROWNUM__")
+
+    # Merge the two rows
+    Map.merge(left_clean, right_clean)
+  end
+
+  # Create a row with NULL values for all columns
+  defp make_null_row([]) do
+    %{}
+  end
+
+  defp make_null_row([sample_row | _]) do
+    sample_row
+    |> Map.delete("__ROWNUM__")
+    |> Map.keys()
+    |> Enum.reduce(%{}, fn key, acc -> Map.put(acc, key, nil) end)
   end
 
   # Execute SELECT on a view by running the underlying query
@@ -1492,7 +1718,21 @@ defmodule OracleDb.Storage do
 
   defp evaluate_condition(row, {:comparison, column, op, value}) do
     row_value = get_column_value(row, column)
-    compare(row_value, op, value)
+
+    # Check if value is a column reference (for join conditions)
+    # If value is a string that matches a column name in the row, use that column's value
+    compare_value =
+      if is_binary(value) and not is_number_string?(value) do
+        # Try to get the value as a column reference
+        case get_column_value(row, value) do
+          nil -> value
+          col_val -> col_val
+        end
+      else
+        value
+      end
+
+    compare(row_value, op, compare_value)
   end
 
   defp evaluate_condition(row, {:is_null, column}) do
@@ -1535,6 +1775,20 @@ defmodule OracleDb.Storage do
   end
 
   defp evaluate_condition(_row, _), do: true
+
+  # Check if a string represents a number
+  defp is_number_string?(str) when is_binary(str) do
+    case Float.parse(str) do
+      {_, ""} -> true
+      _ ->
+        case Integer.parse(str) do
+          {_, ""} -> true
+          _ -> false
+        end
+    end
+  end
+
+  defp is_number_string?(_), do: false
 
   defp parse_raw_condition(row, [col, "=", val]) do
     row_value = get_column_value(row, col)

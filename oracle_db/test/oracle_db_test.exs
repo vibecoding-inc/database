@@ -1242,4 +1242,98 @@ defmodule OracleDbTest do
       assert {:ok, %{message: "Trigger STATEMENT_TRIGGER created"}} = result
     end
   end
+
+  describe "JOIN operations" do
+    setup %{db: db} do
+      OracleDb.execute(db, "CREATE TABLE users(id NUMBER, name VARCHAR(100))")
+      OracleDb.execute(db, "CREATE TABLE emp(u_id NUMBER, job_name VARCHAR(100))")
+
+      OracleDb.execute(db, "INSERT INTO users VALUES (1, 'max')")
+      OracleDb.execute(db, "INSERT INTO users VALUES (2, 'josef')")
+      OracleDb.execute(db, "INSERT INTO users VALUES (3, 'anna')")
+
+      OracleDb.execute(db, "INSERT INTO emp VALUES (1, 'chef')")
+      OracleDb.execute(db, "INSERT INTO emp VALUES (2, 'hackler')")
+
+      :ok
+    end
+
+    test "INNER JOIN returns matching rows", %{db: db} do
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM users JOIN emp ON id = u_id")
+
+      assert length(rows) == 2
+
+      # Should have columns from both tables
+      first_row = hd(rows)
+      assert Map.has_key?(first_row, "id")
+      assert Map.has_key?(first_row, "name")
+      assert Map.has_key?(first_row, "u_id")
+      assert Map.has_key?(first_row, "job_name")
+    end
+
+    test "INNER JOIN matches correct rows", %{db: db} do
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM users JOIN emp ON id = u_id")
+
+      # Find max's row (id=1)
+      max_row = Enum.find(rows, fn r -> r["id"] == 1 end)
+      assert max_row["name"] == "max"
+      assert max_row["job_name"] == "chef"
+
+      # Find josef's row (id=2)
+      josef_row = Enum.find(rows, fn r -> r["id"] == 2 end)
+      assert josef_row["name"] == "josef"
+      assert josef_row["job_name"] == "hackler"
+    end
+
+    test "LEFT OUTER JOIN includes unmatched left rows", %{db: db} do
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM users LEFT JOIN emp ON id = u_id")
+
+      # Should include anna (id=3) who has no emp record
+      assert length(rows) == 3
+
+      anna_row = Enum.find(rows, fn r -> r["id"] == 3 end)
+      assert anna_row["name"] == "anna"
+      assert anna_row["job_name"] == nil
+    end
+
+    test "CROSS JOIN returns cartesian product", %{db: db} do
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM users CROSS JOIN emp")
+
+      # 3 users * 2 employees = 6 rows
+      assert length(rows) == 6
+    end
+
+    test "JOIN with WHERE clause filters results", %{db: db} do
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM users JOIN emp ON id = u_id WHERE name = 'max'")
+
+      assert length(rows) == 1
+      assert hd(rows)["name"] == "max"
+    end
+  end
+
+  describe "SET command" do
+    test "SET command is accepted", %{db: db} do
+      result = OracleDb.execute(db, "SET dbms_output = 'on'")
+      assert {:ok, %{message: message}} = result
+      assert message =~ "DBMS_OUTPUT"
+    end
+  end
+
+  describe "INSERT validation" do
+    test "INSERT with values in column position returns error", %{db: db} do
+      OracleDb.execute(db, "CREATE TABLE test_table(id NUMBER, name VARCHAR(100))")
+
+      result = OracleDb.execute(db, "INSERT INTO test_table(1, 'test')")
+      assert {:error, message} = result
+      assert message =~ "column names cannot be numeric values or string literals"
+    end
+
+    test "INSERT with VALUE instead of VALUES returns error", %{db: db} do
+      OracleDb.execute(db, "CREATE TABLE test_table(id NUMBER, name VARCHAR(100))")
+
+      result = OracleDb.execute(db, "INSERT INTO test_table VALUE (1, 'test')")
+      assert {:error, message} = result
+      assert message =~ "use VALUES instead of VALUE"
+    end
+  end
 end

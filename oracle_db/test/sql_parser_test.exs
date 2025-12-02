@@ -1099,4 +1099,105 @@ defmodule OracleDb.SqlParserTest do
       assert {:anonymous_block, _} = SqlParser.parse(sql)
     end
   end
+
+  describe "INSERT validation" do
+    test "rejects INSERT with numeric values as column names" do
+      {:error, message} = SqlParser.parse("INSERT INTO emp(1, 'chef')")
+      assert message =~ "column names cannot be numeric values or string literals"
+    end
+
+    test "rejects INSERT with VALUE instead of VALUES" do
+      {:error, message} = SqlParser.parse("INSERT INTO users VALUE (1, 'test')")
+      assert message =~ "use VALUES instead of VALUE"
+    end
+
+    test "rejects INSERT without VALUES clause" do
+      {:error, message} = SqlParser.parse("INSERT INTO users")
+      assert message =~ "missing VALUES clause"
+    end
+
+    test "accepts valid INSERT with column list and VALUES" do
+      {:insert, result} = SqlParser.parse("INSERT INTO users(id, name) VALUES (1, 'test')")
+      assert result.table == "users"
+      assert result.columns == ["id", "name"]
+      assert result.values == [[1, "test"]]
+    end
+
+    test "accepts valid INSERT without column list" do
+      {:insert, result} = SqlParser.parse("INSERT INTO users VALUES (1, 'test')")
+      assert result.table == "users"
+      assert result.columns == nil
+      assert result.values == [[1, "test"]]
+    end
+  end
+
+  describe "SET statement parsing" do
+    test "parses SET with string value" do
+      {:set, result} = SqlParser.parse("SET dbms_output = 'on'")
+      assert result.variable == "dbms_output"
+      assert result.value == "on"
+    end
+
+    test "parses SET with numeric value" do
+      {:set, result} = SqlParser.parse("SET pagesize = 100")
+      assert result.variable == "pagesize"
+      assert result.value == 100
+    end
+
+    test "parses SET without value" do
+      {:set, result} = SqlParser.parse("SET serveroutput")
+      assert result.variable == "serveroutput"
+      assert result.value == nil
+    end
+  end
+
+  describe "JOIN parsing" do
+    test "parses simple JOIN" do
+      {:select, result} = SqlParser.parse("SELECT * FROM users JOIN emp ON id = u_id")
+      assert {:join, "users", [%{type: :inner, table: "emp", condition: _}]} = result.table
+    end
+
+    test "parses INNER JOIN" do
+      {:select, result} = SqlParser.parse("SELECT * FROM users INNER JOIN emp ON id = u_id")
+      assert {:join, "users", [%{type: :inner}]} = result.table
+    end
+
+    test "parses LEFT JOIN" do
+      {:select, result} = SqlParser.parse("SELECT * FROM users LEFT JOIN emp ON id = u_id")
+      assert {:join, "users", [%{type: :left_outer}]} = result.table
+    end
+
+    test "parses LEFT OUTER JOIN" do
+      {:select, result} = SqlParser.parse("SELECT * FROM users LEFT OUTER JOIN emp ON id = u_id")
+      assert {:join, "users", [%{type: :left_outer}]} = result.table
+    end
+
+    test "parses RIGHT JOIN" do
+      {:select, result} = SqlParser.parse("SELECT * FROM users RIGHT JOIN emp ON id = u_id")
+      assert {:join, "users", [%{type: :right_outer}]} = result.table
+    end
+
+    test "parses FULL OUTER JOIN" do
+      {:select, result} = SqlParser.parse("SELECT * FROM users FULL OUTER JOIN emp ON id = u_id")
+      assert {:join, "users", [%{type: :full_outer}]} = result.table
+    end
+
+    test "parses CROSS JOIN" do
+      {:select, result} = SqlParser.parse("SELECT * FROM users CROSS JOIN roles")
+      assert {:join, "users", [%{type: :cross, table: "roles"}]} = result.table
+    end
+
+    test "parses multiple JOINs" do
+      {:select, result} = SqlParser.parse("SELECT * FROM users JOIN emp ON id = u_id JOIN roles ON role_id = r_id")
+      assert {:join, "users", [_, _]} = result.table
+      assert {:join, "users", joins} = result.table
+      assert length(joins) == 2
+    end
+
+    test "parses JOIN with WHERE clause" do
+      {:select, result} = SqlParser.parse("SELECT * FROM users JOIN emp ON id = u_id WHERE name = 'test'")
+      assert {:join, "users", [_]} = result.table
+      assert result.where != nil
+    end
+  end
 end

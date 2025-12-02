@@ -117,7 +117,7 @@ defmodule OracleDb.PlsqlInterpreter do
   # Initialize variables from input parameters
   defp initialize_parameters(params, param_defs) do
     Enum.reduce(param_defs, %{}, fn param, acc ->
-      param_name = normalize_param_name(param.name)
+      param_name = normalize_var_name(param.name)
       
       case param.mode do
         :in -> 
@@ -135,7 +135,7 @@ defmodule OracleDb.PlsqlInterpreter do
     Enum.reduce(param_defs, %{}, fn param, acc ->
       case param.mode do
         mode when mode in [:out, :in_out] ->
-          param_name = normalize_param_name(param.name)
+          param_name = normalize_var_name(param.name)
           Map.put(acc, param.name, Map.get(context.variables, param_name))
         _ ->
           acc
@@ -148,17 +148,16 @@ defmodule OracleDb.PlsqlInterpreter do
     param_defs
     |> Enum.zip(args)
     |> Enum.reduce(%{}, fn {param, value}, acc ->
-      Map.put(acc, normalize_param_name(param.name), value)
+      Map.put(acc, normalize_var_name(param.name), value)
     end)
   end
 
-  defp normalize_param_name(name) when is_binary(name) do
-    name
-    |> String.upcase()
-    |> String.trim_leading("P_")
+  # Normalize variable/parameter names to uppercase
+  defp normalize_var_name(name) when is_binary(name) do
+    String.upcase(name)
   end
 
-  defp normalize_param_name(name), do: to_string(name) |> normalize_param_name()
+  defp normalize_var_name(name), do: to_string(name) |> normalize_var_name()
 
   # Parse PL/SQL body into a list of statements
   defp parse_plsql_body(body) when is_binary(body) do
@@ -280,17 +279,18 @@ defmodule OracleDb.PlsqlInterpreter do
   defp split_statements(body) do
     # Simple split by semicolon - this handles most cases
     # For complex nested blocks, we need more sophisticated parsing
-    body
-    |> tokenize_for_split()
+    
+    # First, replace string literals with placeholders to avoid splitting on semicolons inside strings
+    {processed, literals} = replace_string_literals(body)
+    
+    # Group statements respecting block structure
+    statements = processed
     |> group_statements()
     |> Enum.map(&String.trim/1)
     |> Enum.filter(&(&1 != ""))
-  end
-
-  defp tokenize_for_split(body) do
-    # Replace string literals to avoid splitting on semicolons inside strings
-    {processed, _literals} = replace_string_literals(body)
-    processed
+    
+    # Restore string literals in each statement
+    Enum.map(statements, fn stmt -> restore_string_literals(stmt, literals) end)
   end
 
   defp replace_string_literals(body) do
@@ -304,6 +304,12 @@ defmodule OracleDb.PlsqlInterpreter do
       end)
     
     {result, literals}
+  end
+
+  defp restore_string_literals(text, literals) do
+    Enum.reduce(literals, text, fn {placeholder, original}, acc ->
+      String.replace(acc, placeholder, original)
+    end)
   end
 
   defp group_statements(body) do
@@ -320,16 +326,22 @@ defmodule OracleDb.PlsqlInterpreter do
         
         new_depth = depth + start_count - end_count
         
-        if new_depth <= 0 and depth > 0 do
-          # End of a block
-          {stmts ++ [current <> ";" <> part], 0, ""}
-        else if new_depth > 0 do
-          # Inside a block
-          {stmts, new_depth, current <> (if current == "", do: "", else: ";") <> part}
-        else
-          # Regular statement
-          {stmts ++ [part], 0, ""}
-        end
+        cond do
+          new_depth <= 0 and depth > 0 ->
+            # End of a block - reset depth to 0
+            {stmts ++ [current <> ";" <> part], 0, ""}
+          
+          new_depth > 0 ->
+            # Starting or inside a block
+            {stmts, new_depth, current <> (if current == "", do: "", else: ";") <> part}
+          
+          depth > 0 ->
+            # Still accumulating within a block (even if new_depth went negative temporarily)
+            {stmts, depth, current <> (if current == "", do: "", else: ";") <> part}
+          
+          true ->
+            # Regular statement at top level
+            {stmts ++ [part], 0, ""}
         end
       end)
     
@@ -338,11 +350,14 @@ defmodule OracleDb.PlsqlInterpreter do
   end
 
   defp count_block_starters(text) do
-    if_count = length(Regex.scan(~r/\bIF\b/, text))
-    loop_count = length(Regex.scan(~r/\bLOOP\b/, text))
-    case_count = length(Regex.scan(~r/\bCASE\b/, text))
+    # Count IF (but not END IF), LOOP (but not END LOOP), CASE (but not END CASE), BEGIN (but not END)
+    # We need to be careful not to count LOOP in "END LOOP" as a starter
+    # Only count IF when followed by space (to avoid IF within END IF)
+    if_count = length(Regex.scan(~r/\bIF\s+/, text)) - length(Regex.scan(~r/\bEND\s+IF\b/, text))
+    loop_count = length(Regex.scan(~r/\bLOOP\b/, text)) - length(Regex.scan(~r/\bEND\s+LOOP\b/, text))
+    case_count = length(Regex.scan(~r/\bCASE\b/, text)) - length(Regex.scan(~r/\bEND\s+CASE\b/, text))
     begin_count = length(Regex.scan(~r/\bBEGIN\b/, text))
-    if_count + loop_count + case_count + begin_count
+    max(0, if_count) + max(0, loop_count) + max(0, case_count) + max(0, begin_count)
   end
 
   defp count_block_enders(text) do

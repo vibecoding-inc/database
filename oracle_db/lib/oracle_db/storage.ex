@@ -1457,6 +1457,8 @@ defmodule OracleDb.Storage do
 
   defp join_condition_matches?(left_row, right_row, {:using, columns}) do
     # USING clause - columns must match in both tables
+    # Note: In SQL, NULL values do NOT match each other (NULL = NULL is UNKNOWN, not TRUE)
+    # so we require non-nil values to match
     Enum.all?(columns, fn col ->
       left_val = get_column_value(left_row, col)
       right_val = get_column_value(right_row, col)
@@ -1471,12 +1473,15 @@ defmodule OracleDb.Storage do
   end
 
   # Merge two rows from different tables
+  # Note: If both tables have columns with the same name, the right table's value
+  # will be used. In a production implementation, you might want to qualify column
+  # names with table aliases to avoid ambiguity.
   defp merge_rows(left, right) do
     # Remove internal columns like __ROWNUM__ before merging
     left_clean = Map.delete(left, "__ROWNUM__")
     right_clean = Map.delete(right, "__ROWNUM__")
 
-    # Merge the two rows
+    # Merge the two rows (right table values take precedence for duplicate keys)
     Map.merge(left_clean, right_clean)
   end
 
@@ -1723,10 +1728,12 @@ defmodule OracleDb.Storage do
     # If value is a string that matches a column name in the row, use that column's value
     compare_value =
       if is_binary(value) and not is_number_string?(value) do
-        # Try to get the value as a column reference
-        case get_column_value(row, value) do
-          nil -> value
-          col_val -> col_val
+        # Check if this value references a column that exists in the row
+        if column_exists?(row, value) do
+          get_column_value(row, value)
+        else
+          # Not a column reference, treat as literal value
+          value
         end
       else
         value
@@ -1775,6 +1782,19 @@ defmodule OracleDb.Storage do
   end
 
   defp evaluate_condition(_row, _), do: true
+
+  # Check if a column exists in the row (case-insensitive)
+  defp column_exists?(row, column) when is_binary(column) do
+    upcase_col = String.upcase(column)
+
+    Enum.any?(Map.keys(row), fn k ->
+      String.upcase(to_string(k)) == upcase_col
+    end)
+  end
+
+  defp column_exists?(row, column) do
+    Map.has_key?(row, column)
+  end
 
   # Check if a string represents a number
   defp is_number_string?(str) when is_binary(str) do

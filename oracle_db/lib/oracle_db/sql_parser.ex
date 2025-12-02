@@ -1008,8 +1008,8 @@ defmodule OracleDb.SqlParser do
         case col do
           # String literals are not valid column names
           {:string, _} -> true
-          # Check if it looks like a number
-          col when is_binary(col) -> String.match?(col, ~r/^\d+\.?\d*$/)
+          # Check if it looks like a number (integer or decimal)
+          col when is_binary(col) -> String.match?(col, ~r/^\d+(\.\d+)?$/)
           _ -> false
         end
       end)

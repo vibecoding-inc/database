@@ -54,6 +54,39 @@ defmodule OracleDb.SqlParser do
     end
   end
 
+  @doc """
+  Checks if the given SQL is a PL/SQL block that may contain multiple statements.
+
+  Returns true for:
+  - CREATE PROCEDURE / CREATE OR REPLACE PROCEDURE
+  - CREATE FUNCTION / CREATE OR REPLACE FUNCTION
+  - CREATE TRIGGER / CREATE OR REPLACE TRIGGER
+  - CREATE PACKAGE / CREATE OR REPLACE PACKAGE
+  - BEGIN (anonymous block)
+  - DECLARE (anonymous block with declarations)
+  """
+  @spec is_plsql_block?(String.t()) :: boolean()
+  def is_plsql_block?(sql) do
+    sql_upper = String.upcase(String.trim(sql))
+    is_plsql_statement?(sql_upper)
+  end
+
+  @doc """
+  Checks if a PL/SQL block is complete (properly terminated with END;).
+
+  A block is complete when:
+  - It ends with "END;" or "END <name>;"
+  - The BEGIN/END blocks are balanced
+  """
+  @spec plsql_block_complete?(String.t()) :: boolean()
+  def plsql_block_complete?(sql) do
+    sql_upper = String.upcase(sql)
+
+    # The block is complete when it ends with "END;" or "END <name>;"
+    # and the BEGIN/END blocks are balanced
+    ends_with_end_semicolon?(sql_upper) and begin_end_balanced?(sql_upper)
+  end
+
   defp is_plsql_statement?(sql_upper) do
     String.starts_with?(sql_upper, "CREATE PROCEDURE") or
       String.starts_with?(sql_upper, "CREATE OR REPLACE PROCEDURE") or
@@ -67,9 +100,32 @@ defmodule OracleDb.SqlParser do
       String.starts_with?(sql_upper, "DECLARE")
   end
 
+  defp ends_with_end_semicolon?(sql) do
+    # Match END; or END <identifier>;
+    Regex.match?(~r/END\s*;?\s*$/i, sql) or
+      Regex.match?(~r/END\s+\w+\s*;?\s*$/i, sql)
+  end
+
+  defp begin_end_balanced?(sql) do
+    # Remove string literals to avoid false matches
+    sql_without_strings = remove_string_literals(sql)
+
+    begin_count = length(Regex.scan(~r/\bBEGIN\b/i, sql_without_strings))
+
+    # Count END that are not followed by IF, LOOP, CASE (those are block terminators within PL/SQL)
+    # We want to count standalone END or END <procedure_name>
+    end_count = count_terminal_ends(sql_without_strings)
+
+    begin_count > 0 and end_count >= begin_count
+  end
+
+  defp remove_string_literals(sql) do
+    Regex.replace(~r/'[^']*'/, sql, "''")
+  end
+
   defp validate_plsql_block_structure(sql) do
     # Remove string literals to avoid false matches
-    sql_without_strings = Regex.replace(~r/'[^']*'/, sql, "''")
+    sql_without_strings = remove_string_literals(sql)
 
     # Check for required BEGIN keyword (for procedures, functions, triggers)
     has_begin = Regex.match?(~r/\bBEGIN\b/, sql_without_strings)

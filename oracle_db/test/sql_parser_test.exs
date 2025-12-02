@@ -421,6 +421,91 @@ defmodule OracleDb.SqlParserTest do
     end
   end
 
+  describe "is_plsql_block?/1" do
+    test "returns true for CREATE PROCEDURE" do
+      assert SqlParser.is_plsql_block?("CREATE PROCEDURE test IS BEGIN NULL; END;")
+    end
+
+    test "returns true for CREATE OR REPLACE PROCEDURE" do
+      assert SqlParser.is_plsql_block?("CREATE OR REPLACE PROCEDURE test IS BEGIN NULL; END;")
+    end
+
+    test "returns true for CREATE FUNCTION" do
+      assert SqlParser.is_plsql_block?(
+               "CREATE FUNCTION test RETURN NUMBER IS BEGIN RETURN 1; END;"
+             )
+    end
+
+    test "returns true for BEGIN" do
+      assert SqlParser.is_plsql_block?("BEGIN NULL; END;")
+    end
+
+    test "returns true for DECLARE" do
+      assert SqlParser.is_plsql_block?("DECLARE v_test NUMBER; BEGIN NULL; END;")
+    end
+
+    test "returns false for SELECT" do
+      refute SqlParser.is_plsql_block?("SELECT * FROM users")
+    end
+
+    test "returns false for INSERT" do
+      refute SqlParser.is_plsql_block?("INSERT INTO users VALUES (1, 'test')")
+    end
+
+    test "returns false for CREATE TABLE" do
+      refute SqlParser.is_plsql_block?("CREATE TABLE users (id NUMBER)")
+    end
+  end
+
+  describe "plsql_block_complete?/1" do
+    test "returns true for complete procedure with END;" do
+      assert SqlParser.plsql_block_complete?("""
+               CREATE PROCEDURE test IS
+               BEGIN
+                 NULL;
+               END;
+             """)
+    end
+
+    test "returns true for complete procedure with END name;" do
+      assert SqlParser.plsql_block_complete?("""
+               CREATE PROCEDURE test IS
+               BEGIN
+                 NULL;
+               END test;
+             """)
+    end
+
+    test "returns false for incomplete procedure (no END)" do
+      refute SqlParser.plsql_block_complete?("""
+               CREATE PROCEDURE test IS
+               BEGIN
+                 NULL;
+             """)
+    end
+
+    test "returns false when BEGIN/END unbalanced" do
+      refute SqlParser.plsql_block_complete?("""
+               CREATE PROCEDURE test IS
+               BEGIN
+                 BEGIN
+                   NULL;
+                 END;
+             """)
+    end
+
+    test "returns true for nested BEGIN/END when balanced" do
+      assert SqlParser.plsql_block_complete?("""
+               CREATE PROCEDURE test IS
+               BEGIN
+                 BEGIN
+                   NULL;
+                 END;
+               END;
+             """)
+    end
+  end
+
   describe "tokenization" do
     test "tokenizes simple statement" do
       tokens = SqlParser.tokenize("SELECT * FROM users")

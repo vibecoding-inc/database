@@ -194,7 +194,8 @@ defmodule OracleDb.Repl do
         sql
 
       # Check if we're in a PL/SQL block that needs to continue until END;
-      is_plsql_block?(trimmed) and not plsql_block_complete?(trimmed) ->
+      OracleDb.SqlParser.is_plsql_block?(trimmed) and
+          not OracleDb.SqlParser.plsql_block_complete?(trimmed) ->
         # Continue collecting input until the PL/SQL block is complete
         case IO.gets("     > ") do
           :eof ->
@@ -224,54 +225,6 @@ defmodule OracleDb.Repl do
             collect_multiline_sql(sql <> "\n" <> String.trim(more))
         end
     end
-  end
-
-  # Detect if the SQL is a PL/SQL block that contains multiple semicolons
-  defp is_plsql_block?(sql) do
-    sql_upper = String.upcase(sql)
-
-    # Check for PL/SQL constructs that contain multiple statements
-    String.starts_with?(sql_upper, "CREATE PROCEDURE") or
-      String.starts_with?(sql_upper, "CREATE OR REPLACE PROCEDURE") or
-      String.starts_with?(sql_upper, "CREATE FUNCTION") or
-      String.starts_with?(sql_upper, "CREATE OR REPLACE FUNCTION") or
-      String.starts_with?(sql_upper, "CREATE TRIGGER") or
-      String.starts_with?(sql_upper, "CREATE OR REPLACE TRIGGER") or
-      String.starts_with?(sql_upper, "CREATE PACKAGE") or
-      String.starts_with?(sql_upper, "CREATE OR REPLACE PACKAGE") or
-      String.starts_with?(sql_upper, "BEGIN") or
-      String.starts_with?(sql_upper, "DECLARE")
-  end
-
-  # Check if a PL/SQL block is complete by looking for matching BEGIN/END
-  defp plsql_block_complete?(sql) do
-    sql_upper = String.upcase(sql)
-
-    # The block is complete when it ends with "END;" or "END <name>;"
-    # and the BEGIN/END blocks are balanced
-    ends_with_end_semicolon?(sql_upper) and begin_end_balanced?(sql_upper)
-  end
-
-  defp ends_with_end_semicolon?(sql) do
-    # Match END; or END <identifier>;
-    Regex.match?(~r/END\s*;?\s*$/i, sql) or
-      Regex.match?(~r/END\s+\w+\s*;?\s*$/i, sql)
-  end
-
-  defp begin_end_balanced?(sql) do
-    # Count BEGIN and END keywords (excluding END IF, END LOOP, etc.)
-    # Note: We need to handle string literals to avoid false matches
-    sql_without_strings = Regex.replace(~r/'[^']*'/, sql, "")
-
-    begin_count = length(Regex.scan(~r/\bBEGIN\b/i, sql_without_strings))
-
-    # Count END that are not followed by IF, LOOP, CASE (those are block terminators within PL/SQL)
-    # We want to count standalone END or END <procedure_name>
-    end_count =
-      length(Regex.scan(~r/\bEND\s*;/i, sql_without_strings)) +
-        length(Regex.scan(~r/\bEND\s+(?!IF\b|LOOP\b|CASE\b)\w+\s*;/i, sql_without_strings))
-
-    begin_count > 0 and end_count >= begin_count
   end
 
   defp execute_sql(db, sql) do

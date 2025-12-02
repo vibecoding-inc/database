@@ -776,11 +776,14 @@ defmodule OracleDb.Storage do
     if Map.has_key?(state.materialized_views, view_name) do
       {:reply, {:error, "Materialized view #{view_name} already exists"}, state}
     else
-      # Store the view definition; data will be populated on first query or explicit refresh
+      # Execute the underlying query to populate initial data
+      query = Map.get(view_def, :query, %{})
+      initial_data = execute_materialized_view_query(state, query)
+
       new_state = %{
         state
         | materialized_views: Map.put(state.materialized_views, view_name, view_def),
-          data: Map.put(state.data, view_name, [])
+          data: Map.put(state.data, view_name, initial_data)
       }
 
       {:reply, :ok, new_state}
@@ -804,12 +807,17 @@ defmodule OracleDb.Storage do
 
   @impl true
   def handle_call({:refresh_materialized_view, view_name}, _from, state) do
-    if Map.has_key?(state.materialized_views, view_name) do
-      # Note: Full implementation would re-execute the underlying query
-      # and update the cached data in state.data[view_name]
-      {:reply, :ok, state}
-    else
-      {:reply, {:error, "Materialized view #{view_name} does not exist"}, state}
+    case Map.fetch(state.materialized_views, view_name) do
+      {:ok, view_def} ->
+        # Re-execute the underlying query and update the cached data
+        query = Map.get(view_def, :query, %{})
+        refreshed_data = execute_materialized_view_query(state, query)
+
+        new_state = %{state | data: Map.put(state.data, view_name, refreshed_data)}
+        {:reply, :ok, new_state}
+
+      :error ->
+        {:reply, {:error, "Materialized view #{view_name} does not exist"}, state}
     end
   end
 
@@ -1190,8 +1198,10 @@ defmodule OracleDb.Storage do
   end
 
   defp execute_select(state, table_name, columns, where, order_by) do
-    case Map.fetch(state.data, table_name) do
-      {:ok, rows} ->
+    cond do
+      # Check if it's a regular table or materialized view (both have data in state.data)
+      Map.has_key?(state.data, table_name) ->
+        rows = Map.get(state.data, table_name)
         # Apply WHERE filter
         filtered = filter_rows(rows, where)
 
@@ -1203,8 +1213,118 @@ defmodule OracleDb.Storage do
 
         {:ok, projected}
 
-      :error ->
+      # Check if it's a view - execute the underlying query
+      Map.has_key?(state.views, table_name) ->
+        view_def = Map.get(state.views, table_name)
+        execute_view_query(state, view_def, columns, where, order_by)
+
+      # Not found
+      true ->
         {:error, "Table #{table_name} does not exist"}
+    end
+  end
+
+  # Execute a view's underlying query and apply additional filters/projections
+  defp execute_view_query(state, view_def, columns, where, order_by) do
+    query = Map.get(view_def, :query)
+
+    if query == nil do
+      {:error, "View has no underlying query defined"}
+    else
+      # Execute the view's underlying query
+      view_table = Map.get(query, :table)
+      # Normalize table name to uppercase for case-insensitive lookup
+      normalized_table = if view_table, do: normalize_name(view_table), else: nil
+      view_columns = Map.get(query, :columns)
+      view_where = Map.get(query, :where)
+      view_order_by = Map.get(query, :order_by)
+
+      # First, get the rows from the underlying table
+      case execute_select(state, normalized_table, view_columns, view_where, view_order_by) do
+        {:ok, view_rows} ->
+          # Now apply the outer query's filters and projections
+          # Apply additional WHERE filter from outer query
+          filtered = filter_rows(view_rows, where)
+
+          # Apply additional ORDER BY from outer query (overrides view's order if specified)
+          sorted = if order_by, do: sort_rows(filtered, order_by), else: filtered
+
+          # Project columns from outer query
+          # If columns is [{:all, "*"}], return all columns from the view result
+          projected = project_view_columns(sorted, columns, view_def)
+
+          {:ok, projected}
+
+        {:error, _} = error ->
+          error
+      end
+    end
+  end
+
+  # Project columns from a view query result
+  defp project_view_columns(rows, [{:all, "*"}], _view_def) do
+    # Return all columns as-is (already projected by view query)
+    rows
+  end
+
+  defp project_view_columns(rows, columns, view_def) do
+    # Map view column aliases to actual column names if defined
+    column_aliases = get_view_column_aliases(view_def)
+
+    Enum.with_index(rows, 1)
+    |> Enum.map(fn {row, rownum} ->
+      Enum.reduce(columns, %{}, fn col, acc ->
+        {key, value} = evaluate_view_column(row, col, rownum, column_aliases)
+        Map.put(acc, key, value)
+      end)
+    end)
+  end
+
+  # Get the column alias mapping from view definition
+  defp get_view_column_aliases(view_def) do
+    case Map.get(view_def, :columns) do
+      nil -> %{}
+      cols when is_list(cols) ->
+        # Map explicit view column names to query result columns
+        query = Map.get(view_def, :query, %{})
+        query_cols = Map.get(query, :columns, [])
+
+        Enum.zip(cols, query_cols)
+        |> Enum.reduce(%{}, fn {alias_name, query_col}, acc ->
+          col_name = case query_col do
+            {:column, name, _} -> name
+            {:function, _, _, alias_n} -> alias_n
+            _ -> nil
+          end
+          if col_name, do: Map.put(acc, String.upcase(alias_name), col_name), else: acc
+        end)
+    end
+  end
+
+  defp evaluate_view_column(row, {:column, name, alias_name}, _rownum, column_aliases) do
+    # Check if name is a view column alias
+    actual_name = Map.get(column_aliases, String.upcase(name), name)
+    value = get_column_value(row, actual_name)
+    key = alias_name || name
+    {key, value}
+  end
+
+  defp evaluate_view_column(row, col, rownum, _column_aliases) do
+    evaluate_column(row, col, rownum)
+  end
+
+  # Execute a materialized view's underlying query to populate data
+  defp execute_materialized_view_query(state, query) do
+    table = Map.get(query, :table)
+    # Normalize table name to uppercase for case-insensitive lookup
+    normalized_table = if table, do: normalize_name(table), else: nil
+    columns = Map.get(query, :columns)
+    where = Map.get(query, :where)
+    order_by = Map.get(query, :order_by)
+
+    case execute_select(state, normalized_table, columns, where, order_by) do
+      {:ok, rows} -> rows
+      {:error, _} -> []
     end
   end
 

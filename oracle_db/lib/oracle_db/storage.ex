@@ -1225,7 +1225,14 @@ defmodule OracleDb.Storage do
 
   # Execute SELECT on a view by running the underlying query
   # Uses visited_views set to prevent circular references causing infinite recursion
-  defp execute_view_select(state, view_def, columns, where, order_by, visited_views \\ MapSet.new()) do
+  defp execute_view_select(
+         state,
+         view_def,
+         columns,
+         where,
+         order_by,
+         visited_views \\ MapSet.new()
+       ) do
     # Get the view's underlying query
     query = Map.get(view_def, :query)
     view_name = Map.get(view_def, :name)
@@ -1238,14 +1245,24 @@ defmodule OracleDb.Storage do
         {:error, "Circular view reference detected: #{underlying_table}"}
       else
         # Add current view to visited set for cycle detection
-        new_visited = if view_name, do: MapSet.put(visited_views, normalize_name(view_name)), else: visited_views
+        new_visited =
+          if view_name,
+            do: MapSet.put(visited_views, normalize_name(view_name)),
+            else: visited_views
 
         # Execute the underlying query
         underlying_columns = Map.get(query, :columns)
         underlying_where = Map.get(query, :where)
         underlying_order_by = Map.get(query, :order_by)
 
-        case execute_select_with_cycle_detection(state, underlying_table, underlying_columns, underlying_where, underlying_order_by, new_visited) do
+        case execute_select_with_cycle_detection(
+               state,
+               underlying_table,
+               underlying_columns,
+               underlying_where,
+               underlying_order_by,
+               new_visited
+             ) do
           {:ok, base_rows} ->
             # Apply additional WHERE filter from outer query
             filtered = filter_rows(base_rows, where)
@@ -1271,7 +1288,14 @@ defmodule OracleDb.Storage do
   # Execute SELECT on a materialized view
   # Note: Current implementation re-executes the underlying query.
   # A production implementation would use cached/materialized data for performance.
-  defp execute_materialized_view_select(state, mv_def, columns, where, order_by, visited_views \\ MapSet.new()) do
+  defp execute_materialized_view_select(
+         state,
+         mv_def,
+         columns,
+         where,
+         order_by,
+         visited_views \\ MapSet.new()
+       ) do
     # Get the materialized view's underlying query
     query = Map.get(mv_def, :query)
     view_name = Map.get(mv_def, :name)
@@ -1284,14 +1308,24 @@ defmodule OracleDb.Storage do
         {:error, "Circular view reference detected: #{underlying_table}"}
       else
         # Add current view to visited set for cycle detection
-        new_visited = if view_name, do: MapSet.put(visited_views, normalize_name(view_name)), else: visited_views
+        new_visited =
+          if view_name,
+            do: MapSet.put(visited_views, normalize_name(view_name)),
+            else: visited_views
 
         # Execute the underlying query
         underlying_columns = Map.get(query, :columns)
         underlying_where = Map.get(query, :where)
         underlying_order_by = Map.get(query, :order_by)
 
-        case execute_select_with_cycle_detection(state, underlying_table, underlying_columns, underlying_where, underlying_order_by, new_visited) do
+        case execute_select_with_cycle_detection(
+               state,
+               underlying_table,
+               underlying_columns,
+               underlying_where,
+               underlying_order_by,
+               new_visited
+             ) do
           {:ok, base_rows} ->
             # Apply additional WHERE filter from outer query
             filtered = filter_rows(base_rows, where)
@@ -1314,7 +1348,14 @@ defmodule OracleDb.Storage do
   end
 
   # Helper function that performs select with cycle detection for views
-  defp execute_select_with_cycle_detection(state, table_name, columns, where, order_by, visited_views) do
+  defp execute_select_with_cycle_detection(
+         state,
+         table_name,
+         columns,
+         where,
+         order_by,
+         visited_views
+       ) do
     # First check if it's a view
     case Map.fetch(state.views, table_name) do
       {:ok, view_def} ->
@@ -1324,7 +1365,14 @@ defmodule OracleDb.Storage do
         # Check if it's a materialized view
         case Map.fetch(state.materialized_views, table_name) do
           {:ok, mv_def} ->
-            execute_materialized_view_select(state, mv_def, columns, where, order_by, visited_views)
+            execute_materialized_view_select(
+              state,
+              mv_def,
+              columns,
+              where,
+              order_by,
+              visited_views
+            )
 
           :error ->
             # Check if it's a table

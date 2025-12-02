@@ -288,6 +288,139 @@ defmodule OracleDb.SqlParserTest do
     end
   end
 
+  describe "PL/SQL syntax validation" do
+    test "returns error for incomplete procedure (missing END)" do
+      sql = """
+      CREATE PROCEDURE hello_proc (p_name IN VARCHAR2)
+      IS
+      BEGIN
+      DBMS_OUTPUT.PUT_LINE('Hello ' || p_name);
+      """
+
+      assert {:error, "PL/SQL block not properly terminated with END;"} = SqlParser.parse(sql)
+    end
+
+    test "returns error for procedure with unbalanced BEGIN/END" do
+      sql = """
+      CREATE PROCEDURE test_proc
+      IS
+      BEGIN
+        BEGIN
+          NULL;
+        END;
+      """
+
+      assert {:error, _} = SqlParser.parse(sql)
+    end
+
+    test "accepts complete procedure with END;" do
+      sql = """
+      CREATE PROCEDURE hello_proc (p_name IN VARCHAR2)
+      IS
+      BEGIN
+        DBMS_OUTPUT.PUT_LINE('Hello ' || p_name);
+      END;
+      """
+
+      assert {:create_procedure, %{name: "hello_proc"}} = SqlParser.parse(sql)
+    end
+
+    test "accepts complete procedure with END name;" do
+      sql = """
+      CREATE PROCEDURE hello_proc
+      IS
+      BEGIN
+        NULL;
+      END hello_proc;
+      """
+
+      assert {:create_procedure, %{name: "hello_proc"}} = SqlParser.parse(sql)
+    end
+
+    test "returns error for incomplete function (missing END)" do
+      sql = """
+      CREATE FUNCTION add_numbers (p_a NUMBER, p_b NUMBER)
+      RETURN NUMBER
+      IS
+      BEGIN
+        RETURN p_a + p_b;
+      """
+
+      assert {:error, "PL/SQL block not properly terminated with END;"} = SqlParser.parse(sql)
+    end
+
+    test "accepts complete function" do
+      sql = """
+      CREATE FUNCTION add_numbers (p_a NUMBER, p_b NUMBER)
+      RETURN NUMBER
+      IS
+      BEGIN
+        RETURN p_a + p_b;
+      END;
+      """
+
+      assert {:create_function, %{name: "add_numbers"}} = SqlParser.parse(sql)
+    end
+
+    test "returns error for incomplete anonymous block" do
+      sql = """
+      BEGIN
+        DBMS_OUTPUT.PUT_LINE('Hello');
+      """
+
+      assert {:error, "PL/SQL block not properly terminated with END;"} = SqlParser.parse(sql)
+    end
+
+    test "accepts complete anonymous block" do
+      sql = """
+      BEGIN
+        DBMS_OUTPUT.PUT_LINE('Hello');
+      END;
+      """
+
+      assert {:anonymous_block, _} = SqlParser.parse(sql)
+    end
+
+    test "returns error for incomplete DECLARE block" do
+      sql = """
+      DECLARE
+        v_name VARCHAR2(100);
+      BEGIN
+        v_name := 'Test';
+      """
+
+      assert {:error, "PL/SQL block not properly terminated with END;"} = SqlParser.parse(sql)
+    end
+
+    test "accepts complete DECLARE block" do
+      sql = """
+      DECLARE
+        v_name VARCHAR2(100);
+      BEGIN
+        v_name := 'Test';
+      END;
+      """
+
+      assert {:anonymous_block, _} = SqlParser.parse(sql)
+    end
+
+    test "handles nested BEGIN/END properly" do
+      sql = """
+      CREATE PROCEDURE nested_proc
+      IS
+      BEGIN
+        IF TRUE THEN
+          BEGIN
+            NULL;
+          END;
+        END IF;
+      END;
+      """
+
+      assert {:create_procedure, _} = SqlParser.parse(sql)
+    end
+  end
+
   describe "tokenization" do
     test "tokenizes simple statement" do
       tokens = SqlParser.tokenize("SELECT * FROM users")

@@ -494,8 +494,10 @@ defmodule OracleDb.QueryExecutor do
   defp resolve_call_arguments(args) do
     Enum.map(args, fn
       {:literal, value} -> value
-      {:identifier, _name} -> nil  # Identifiers would need context to resolve
-      {:bind_var, _name} -> nil    # Bind variables would need context to resolve
+      # Identifiers would need context to resolve
+      {:identifier, _name} -> nil
+      # Bind variables would need context to resolve
+      {:bind_var, _name} -> nil
       other -> other
     end)
   end

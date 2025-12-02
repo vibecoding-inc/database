@@ -554,7 +554,7 @@ defmodule VibeDb.Storage do
   def handle_call({:insert, table_name, columns, values_list}, _from, state) do
     case Map.fetch(state.tables, table_name) do
       {:ok, schema} ->
-        case insert_rows(state, table_name, schema, columns, values_list) do
+        case insert_rows_with_triggers(state, table_name, schema, columns, values_list) do
           {:ok, new_state, count} -> {:reply, {:ok, count}, new_state}
           {:error, _} = err -> {:reply, err, state}
         end
@@ -574,9 +574,14 @@ defmodule VibeDb.Storage do
   def handle_call({:update, table_name, sets, where}, _from, state) do
     case Map.fetch(state.data, table_name) do
       {:ok, rows} ->
-        {updated_rows, count} = apply_update(rows, sets, where)
-        new_state = %{state | data: Map.put(state.data, table_name, updated_rows)}
-        {:reply, {:ok, count}, new_state}
+        case apply_update_with_triggers(state, table_name, rows, sets, where) do
+          {:ok, updated_rows, count, new_state} ->
+            final_state = %{new_state | data: Map.put(new_state.data, table_name, updated_rows)}
+            {:reply, {:ok, count}, final_state}
+
+          {:error, _} = err ->
+            {:reply, err, state}
+        end
 
       :error ->
         {:reply, {:error, "Table #{table_name} does not exist"}, state}
@@ -587,9 +592,14 @@ defmodule VibeDb.Storage do
   def handle_call({:delete, table_name, where}, _from, state) do
     case Map.fetch(state.data, table_name) do
       {:ok, rows} ->
-        {remaining_rows, deleted_count} = apply_delete(rows, where)
-        new_state = %{state | data: Map.put(state.data, table_name, remaining_rows)}
-        {:reply, {:ok, deleted_count}, new_state}
+        case apply_delete_with_triggers(state, table_name, rows, where) do
+          {:ok, remaining_rows, deleted_count, new_state} ->
+            final_state = %{new_state | data: Map.put(new_state.data, table_name, remaining_rows)}
+            {:reply, {:ok, deleted_count}, final_state}
+
+          {:error, _} = err ->
+            {:reply, err, state}
+        end
 
       :error ->
         {:reply, {:error, "Table #{table_name} does not exist"}, state}
@@ -1077,6 +1087,627 @@ defmodule VibeDb.Storage do
   end
 
   # Private functions
+
+  # Trigger execution helpers
+
+  # Get triggers for a table that match the timing and event
+  defp get_matching_triggers(state, table_name, timing, event) do
+    normalized_table = String.upcase(table_name)
+
+    state.triggers
+    |> Enum.filter(fn {_name, trigger_def} ->
+      trigger_table = String.upcase(to_string(Map.get(trigger_def, :table, "")))
+      trigger_timing = Map.get(trigger_def, :timing)
+      trigger_events = Map.get(trigger_def, :events, [])
+      trigger_enabled = Map.get(trigger_def, :enabled, true)
+
+      trigger_table == normalized_table and
+        trigger_timing == timing and
+        trigger_enabled and
+        event_matches?(trigger_events, event)
+    end)
+    |> Enum.map(fn {name, def} -> Map.put(def, :name, name) end)
+  end
+
+  # Check if any trigger event matches the operation
+  defp event_matches?(trigger_events, event) do
+    Enum.any?(trigger_events, fn trigger_event ->
+      case {trigger_event, event} do
+        {:insert, :insert} -> true
+        {:update, :update} -> true
+        {:delete, :delete} -> true
+        {{:update, _cols}, :update} -> true
+        _ -> false
+      end
+    end)
+  end
+
+  # Fire triggers for a given timing, event, and row context
+  defp fire_triggers(state, table_name, timing, event, old_row, new_row) do
+    triggers = get_matching_triggers(state, table_name, timing, event)
+
+    # Execute each trigger - triggers can modify state through DML operations
+    Enum.reduce_while(triggers, {:ok, state}, fn trigger, {:ok, current_state} ->
+      case execute_trigger(current_state, trigger, old_row, new_row) do
+        {:ok, updated_state} -> {:cont, {:ok, updated_state}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  # Execute a single trigger body
+  defp execute_trigger(state, trigger, old_row, new_row) do
+    body = Map.get(trigger, :body, "")
+    for_each = Map.get(trigger, :for_each, :statement)
+    when_clause = Map.get(trigger, :when_clause)
+
+    # For row-level triggers, check WHEN clause
+    if for_each == :row and when_clause != nil do
+      if evaluate_when_clause(when_clause, old_row, new_row) do
+        do_execute_trigger(state, body, old_row, new_row)
+      else
+        {:ok, state}
+      end
+    else
+      do_execute_trigger(state, body, old_row, new_row)
+    end
+  end
+
+  # Actually execute the trigger body by parsing and executing statements directly
+  defp do_execute_trigger(state, body, old_row, new_row) when is_binary(body) do
+    # Build context with :OLD and :NEW values for row-level triggers
+    trigger_context = %{
+      old_row: normalize_row_keys(old_row),
+      new_row: normalize_row_keys(new_row)
+    }
+
+    # Parse the trigger body and execute statements directly against state
+    case parse_trigger_body(body) do
+      {:ok, statements} ->
+        execute_trigger_statements(state, statements, trigger_context)
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp do_execute_trigger(state, _body, _old_row, _new_row) do
+    {:ok, state}
+  end
+
+  # Parse trigger body into executable statements
+  defp parse_trigger_body(body) when is_binary(body) do
+    body = String.trim(body)
+
+    # Extract the executable section (between BEGIN and END)
+    case Regex.run(~r/BEGIN\s+(.*?)\s+END/is, body, capture: :all_but_first) do
+      [executable] ->
+        statements = parse_trigger_statements(executable)
+        {:ok, statements}
+
+      nil ->
+        # Try without explicit BEGIN/END
+        statements = parse_trigger_statements(body)
+        {:ok, statements}
+    end
+  end
+
+  defp parse_trigger_body(_), do: {:ok, []}
+
+  # Parse individual statements from the trigger body
+  defp parse_trigger_statements(body) do
+    body
+    |> String.split(";")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == "" or String.upcase(&1) == "NULL"))
+    |> Enum.map(&classify_trigger_statement/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  # Classify and parse a single statement
+  defp classify_trigger_statement(stmt) do
+    stmt_upper = String.upcase(stmt)
+
+    cond do
+      String.starts_with?(stmt_upper, "INSERT ") ->
+        parse_trigger_insert(stmt)
+
+      String.starts_with?(stmt_upper, "UPDATE ") ->
+        parse_trigger_update(stmt)
+
+      String.starts_with?(stmt_upper, "DELETE ") ->
+        parse_trigger_delete(stmt)
+
+      true ->
+        nil
+    end
+  end
+
+  # Parse INSERT statement from trigger body
+  defp parse_trigger_insert(stmt) do
+    # Match: INSERT INTO table (cols) VALUES (vals)
+    case Regex.run(
+           ~r/INSERT\s+INTO\s+(\w+)\s*\(([^)]+)\)\s+VALUES\s*\(([^)]+)\)/is,
+           stmt
+         ) do
+      [_, table, cols_str, vals_str] ->
+        columns =
+          cols_str
+          |> String.split(",")
+          |> Enum.map(&(String.trim(&1) |> String.upcase()))
+
+        values =
+          vals_str
+          |> String.split(",")
+          |> Enum.map(&parse_trigger_value/1)
+
+        {:insert, String.upcase(table), columns, values}
+
+      nil ->
+        nil
+    end
+  end
+
+  # Parse UPDATE statement from trigger body
+  defp parse_trigger_update(stmt) do
+    # Match: UPDATE table SET col=val, col=val WHERE condition
+    case Regex.run(
+           ~r/UPDATE\s+(\w+)\s+SET\s+(.+?)(?:\s+WHERE\s+(.+))?$/is,
+           stmt
+         ) do
+      [_, table, sets_str] ->
+        sets = parse_trigger_sets(sets_str)
+        {:update, String.upcase(table), sets, nil}
+
+      [_, table, sets_str, where_str] ->
+        sets = parse_trigger_sets(sets_str)
+        where = parse_trigger_where(where_str)
+        {:update, String.upcase(table), sets, where}
+
+      nil ->
+        nil
+    end
+  end
+
+  # Parse DELETE statement from trigger body
+  defp parse_trigger_delete(stmt) do
+    # Match: DELETE FROM table WHERE condition
+    case Regex.run(
+           ~r/DELETE\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?$/is,
+           stmt
+         ) do
+      [_, table] ->
+        {:delete, String.upcase(table), nil}
+
+      [_, table, where_str] ->
+        where = parse_trigger_where(where_str)
+        {:delete, String.upcase(table), where}
+
+      nil ->
+        nil
+    end
+  end
+
+  # Parse SET clause: col1 = val1, col2 = val2
+  defp parse_trigger_sets(sets_str) do
+    sets_str
+    |> String.split(",")
+    |> Enum.map(fn set ->
+      case String.split(set, "=", parts: 2) do
+        [col, val] ->
+          {String.trim(col) |> String.upcase(), parse_trigger_value(String.trim(val))}
+
+        _ ->
+          nil
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  # Parse WHERE clause (simplified)
+  defp parse_trigger_where(where_str) when is_binary(where_str) do
+    # Simple equality check: col = value
+    case Regex.run(~r/(\w+)\s*=\s*(.+)/i, String.trim(where_str)) do
+      [_, col, val] ->
+        {:eq, String.upcase(col), parse_trigger_value(String.trim(val))}
+
+      nil ->
+        nil
+    end
+  end
+
+  defp parse_trigger_where(_), do: nil
+
+  # Parse a value (literal, :OLD.col, :NEW.col)
+  defp parse_trigger_value(val_str) do
+    val = String.trim(val_str)
+
+    cond do
+      # :OLD.column reference
+      String.starts_with?(String.upcase(val), ":OLD.") ->
+        col = String.slice(val, 5..-1//1) |> String.upcase()
+        {:old_ref, col}
+
+      # :NEW.column reference
+      String.starts_with?(String.upcase(val), ":NEW.") ->
+        col = String.slice(val, 5..-1//1) |> String.upcase()
+        {:new_ref, col}
+
+      # String literal
+      String.starts_with?(val, "'") and String.ends_with?(val, "'") ->
+        {:literal, String.slice(val, 1..-2//1)}
+
+      # Number
+      Regex.match?(~r/^-?\d+(\.\d+)?$/, val) ->
+        case Integer.parse(val) do
+          {num, ""} -> {:literal, num}
+          _ ->
+            case Float.parse(val) do
+              {num, _} -> {:literal, num}
+              _ -> {:literal, val}
+            end
+        end
+
+      # NULL
+      String.upcase(val) == "NULL" ->
+        {:literal, nil}
+
+      # Variable or other
+      true ->
+        {:literal, val}
+    end
+  end
+
+  # Execute parsed trigger statements
+  defp execute_trigger_statements(state, statements, context) do
+    Enum.reduce_while(statements, {:ok, state}, fn stmt, {:ok, current_state} ->
+      case execute_trigger_statement(current_state, stmt, context) do
+        {:ok, new_state} -> {:cont, {:ok, new_state}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  # Execute a single trigger statement
+  defp execute_trigger_statement(state, {:insert, table_name, columns, values}, context) do
+    # Resolve values (including :OLD and :NEW references)
+    resolved_values = Enum.map(values, &resolve_trigger_value(&1, context))
+
+    # Get schema for the table
+    case Map.fetch(state.tables, table_name) do
+      {:ok, _schema} ->
+        # Build the row
+        counter = Map.get(state.row_counter, table_name, 0)
+        row = build_row(columns, resolved_values, counter + 1)
+
+        # Add to table data (don't fire triggers recursively for simplicity)
+        existing_rows = Map.get(state.data, table_name, [])
+
+        new_state = %{
+          state
+          | data: Map.put(state.data, table_name, existing_rows ++ [row]),
+            row_counter: Map.put(state.row_counter, table_name, counter + 1)
+        }
+
+        {:ok, new_state}
+
+      :error ->
+        {:error, "Table #{table_name} does not exist"}
+    end
+  end
+
+  defp execute_trigger_statement(state, {:update, table_name, sets, where}, context) do
+    case Map.fetch(state.data, table_name) do
+      {:ok, rows} ->
+        # Resolve set values
+        resolved_sets =
+          Enum.map(sets, fn {col, val} ->
+            {col, resolve_trigger_value(val, context)}
+          end)
+
+        # Apply updates
+        updated_rows =
+          Enum.map(rows, fn row ->
+            if matches_trigger_where?(row, where, context) do
+              Enum.reduce(resolved_sets, row, fn {col, value}, r ->
+                actual_key =
+                  Enum.find(Map.keys(r), fn k ->
+                    String.upcase(to_string(k)) == col
+                  end) || col
+
+                Map.put(r, actual_key, value)
+              end)
+            else
+              row
+            end
+          end)
+
+        new_state = %{state | data: Map.put(state.data, table_name, updated_rows)}
+        {:ok, new_state}
+
+      :error ->
+        {:error, "Table #{table_name} does not exist"}
+    end
+  end
+
+  defp execute_trigger_statement(state, {:delete, table_name, where}, context) do
+    case Map.fetch(state.data, table_name) do
+      {:ok, rows} ->
+        remaining_rows =
+          Enum.reject(rows, fn row ->
+            matches_trigger_where?(row, where, context)
+          end)
+
+        new_state = %{state | data: Map.put(state.data, table_name, remaining_rows)}
+        {:ok, new_state}
+
+      :error ->
+        {:error, "Table #{table_name} does not exist"}
+    end
+  end
+
+  defp execute_trigger_statement(state, _, _context) do
+    {:ok, state}
+  end
+
+  # Resolve a trigger value (handle :OLD and :NEW references)
+  defp resolve_trigger_value({:old_ref, col}, context) do
+    case context.old_row do
+      nil -> nil
+      row -> Map.get(row, col)
+    end
+  end
+
+  defp resolve_trigger_value({:new_ref, col}, context) do
+    case context.new_row do
+      nil -> nil
+      row -> Map.get(row, col)
+    end
+  end
+
+  defp resolve_trigger_value({:literal, val}, _context), do: val
+  defp resolve_trigger_value(val, _context), do: val
+
+  # Check if a row matches a WHERE condition
+  defp matches_trigger_where?(_row, nil, _context), do: true
+
+  defp matches_trigger_where?(row, {:eq, col, val}, context) do
+    resolved_val = resolve_trigger_value(val, context)
+    row_val = get_row_column(row, col)
+    row_val == resolved_val
+  end
+
+  defp matches_trigger_where?(_row, _, _context), do: true
+
+  # Get column value from row (case-insensitive)
+  defp get_row_column(row, col) do
+    col_upper = String.upcase(col)
+
+    key =
+      Enum.find(Map.keys(row), fn k ->
+        String.upcase(to_string(k)) == col_upper
+      end)
+
+    if key, do: Map.get(row, key), else: nil
+  end
+
+  # Normalize row keys to uppercase for consistent access
+  defp normalize_row_keys(nil), do: nil
+
+  defp normalize_row_keys(row) when is_map(row) do
+    row
+    |> Enum.map(fn {k, v} -> {String.upcase(to_string(k)), v} end)
+    |> Enum.into(%{})
+  end
+
+  # Evaluate WHEN clause condition
+  defp evaluate_when_clause(nil, _old_row, _new_row), do: true
+
+  defp evaluate_when_clause(when_clause, old_row, new_row) when is_binary(when_clause) do
+    # Simple evaluation of WHEN clause - supports basic comparisons
+    # Parse the when clause to check conditions
+    clause = String.upcase(when_clause)
+
+    # Replace :NEW.column and :OLD.column references with actual values
+    # This is a simplified implementation
+    normalized_old = normalize_row_keys(old_row) || %{}
+    normalized_new = normalize_row_keys(new_row) || %{}
+
+    # Extract the comparison from the WHEN clause
+    # Format: NEW.column > value or OLD.column = value etc.
+    cond do
+      String.contains?(clause, "NEW.") ->
+        evaluate_row_condition(clause, "NEW", normalized_new)
+
+      String.contains?(clause, "OLD.") ->
+        evaluate_row_condition(clause, "OLD", normalized_old)
+
+      true ->
+        true
+    end
+  end
+
+  defp evaluate_when_clause(_when_clause, _old_row, _new_row), do: true
+
+  defp evaluate_row_condition(clause, prefix, row) do
+    # Parse simple conditions like "NEW.ID > 0" or "NEW.SALARY > 100000"
+    pattern = ~r/#{prefix}\.(\w+)\s*(>|<|=|>=|<=|<>|!=)\s*(\d+|'[^']*')/i
+
+    case Regex.run(pattern, clause) do
+      [_, column, op, value_str] ->
+        column_upper = String.upcase(column)
+        row_value = Map.get(row, column_upper)
+
+        # Parse the value
+        value =
+          cond do
+            String.starts_with?(value_str, "'") ->
+              String.slice(value_str, 1..-2//1)
+
+            true ->
+              case Integer.parse(value_str) do
+                {num, _} -> num
+                :error -> value_str
+              end
+          end
+
+        compare_trigger_values(row_value, op, value)
+
+      _ ->
+        true
+    end
+  end
+
+  defp compare_trigger_values(left, op, right) do
+    case op do
+      ">" -> left > right
+      "<" -> left < right
+      "=" -> left == right
+      ">=" -> left >= right
+      "<=" -> left <= right
+      "<>" -> left != right
+      "!=" -> left != right
+      _ -> true
+    end
+  end
+
+  # INSERT with triggers
+  defp insert_rows_with_triggers(state, table_name, schema, columns, values_list) do
+    column_names =
+      if columns do
+        columns
+      else
+        Enum.map(schema.columns, fn {name, _, _} -> name end)
+      end
+
+    # Process each row with triggers
+    result =
+      Enum.reduce_while(values_list, {:ok, state, [], state.row_counter[table_name]}, fn values,
+                                                                                         {:ok,
+                                                                                          current_state,
+                                                                                          acc_rows,
+                                                                                          counter} ->
+        new_row = build_row(column_names, values, counter + 1)
+
+        # Fire BEFORE INSERT triggers
+        case fire_triggers(current_state, table_name, :before, :insert, nil, new_row) do
+          {:ok, state_after_before} ->
+            # Fire AFTER INSERT triggers (row is being inserted)
+            case fire_triggers(state_after_before, table_name, :after, :insert, nil, new_row) do
+              {:ok, state_after_after} ->
+                {:cont, {:ok, state_after_after, [new_row | acc_rows], counter + 1}}
+
+              {:error, _} = err ->
+                {:halt, err}
+            end
+
+          {:error, _} = err ->
+            {:halt, err}
+        end
+      end)
+
+    case result do
+      {:ok, final_state, new_rows, new_counter} ->
+        existing_rows = Map.get(state.data, table_name, [])
+
+        updated_state = %{
+          final_state
+          | data: Map.put(final_state.data, table_name, existing_rows ++ Enum.reverse(new_rows)),
+            row_counter: Map.put(final_state.row_counter, table_name, new_counter)
+        }
+
+        {:ok, updated_state, length(values_list)}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # UPDATE with triggers
+  defp apply_update_with_triggers(state, table_name, rows, sets, where) do
+    result =
+      Enum.reduce_while(rows, {:ok, [], 0, state}, fn row, {:ok, acc_rows, count, current_state} ->
+        if evaluate_condition(row, where) do
+          # Calculate the updated row
+          updated_row =
+            Enum.reduce(sets, row, fn {col, value}, r ->
+              actual_key =
+                Enum.find(Map.keys(r), fn k ->
+                  String.upcase(to_string(k)) == String.upcase(col)
+                end) || col
+
+              Map.put(r, actual_key, value)
+            end)
+
+          # Fire BEFORE UPDATE triggers
+          case fire_triggers(current_state, table_name, :before, :update, row, updated_row) do
+            {:ok, state_after_before} ->
+              # Fire AFTER UPDATE triggers
+              case fire_triggers(state_after_before, table_name, :after, :update, row, updated_row) do
+                {:ok, state_after_after} ->
+                  {:cont, {:ok, [updated_row | acc_rows], count + 1, state_after_after}}
+
+                {:error, _} = err ->
+                  {:halt, err}
+              end
+
+            {:error, _} = err ->
+              {:halt, err}
+          end
+        else
+          {:cont, {:ok, [row | acc_rows], count, current_state}}
+        end
+      end)
+
+    case result do
+      {:ok, updated_rows, count, final_state} ->
+        {:ok, Enum.reverse(updated_rows), count, final_state}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # DELETE with triggers
+  defp apply_delete_with_triggers(state, table_name, rows, where) do
+    result =
+      Enum.reduce_while(rows, {:ok, [], 0, state}, fn row, {:ok, remaining, count, current_state} ->
+        should_delete =
+          case where do
+            nil -> true
+            _ -> evaluate_condition(row, where)
+          end
+
+        if should_delete do
+          # Fire BEFORE DELETE triggers
+          case fire_triggers(current_state, table_name, :before, :delete, row, nil) do
+            {:ok, state_after_before} ->
+              # Fire AFTER DELETE triggers
+              case fire_triggers(state_after_before, table_name, :after, :delete, row, nil) do
+                {:ok, state_after_after} ->
+                  # Row is deleted, don't add to remaining
+                  {:cont, {:ok, remaining, count + 1, state_after_after}}
+
+                {:error, _} = err ->
+                  {:halt, err}
+              end
+
+            {:error, _} = err ->
+              {:halt, err}
+          end
+        else
+          {:cont, {:ok, [row | remaining], count, current_state}}
+        end
+      end)
+
+    case result do
+      {:ok, remaining_rows, deleted_count, final_state} ->
+        {:ok, Enum.reverse(remaining_rows), deleted_count, final_state}
+
+      {:error, _} = err ->
+        err
+    end
+  end
 
   defp normalize_name(name) when is_binary(name), do: String.upcase(name)
   defp normalize_name(name), do: name

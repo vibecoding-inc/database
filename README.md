@@ -43,7 +43,7 @@ An in-memory relational database implemented in Elixir that is compatible with V
 - `DROP PACKAGE` / `DROP PACKAGE BODY` - Remove packages or package bodies
 - Package procedures and functions
 
-### Triggers (DDL Only - Execution Not Implemented)
+### Triggers
 - `CREATE TRIGGER` / `CREATE OR REPLACE TRIGGER` - Create database triggers
 - `DROP TRIGGER` - Remove triggers
 - `ALTER TRIGGER ... ENABLE/DISABLE` - Enable or disable triggers
@@ -52,8 +52,7 @@ An in-memory relational database implemented in Elixir that is compatible with V
 - Support for INSERT, UPDATE, DELETE events
 - UPDATE OF column triggers
 - WHEN clause conditions
-
-> **⚠️ Important Limitation:** Trigger definitions can be created, modified, and stored, but **trigger bodies are not executed** during INSERT, UPDATE, or DELETE operations. This feature only supports DDL operations for trigger metadata management.
+- `:OLD` and `:NEW` row references for accessing row data in triggers
 
 ### DML (Data Manipulation Language)
 - `SELECT` - Query data with WHERE, ORDER BY, and column projections
@@ -469,23 +468,21 @@ VibeDb.execute(db, "DROP PACKAGE BODY user_pkg")
 VibeDb.execute(db, "DROP PACKAGE user_pkg")
 ```
 
-### Triggers (DDL Only)
-
-> **⚠️ Note:** Trigger DDL statements (CREATE, DROP, ALTER) work for storing trigger metadata, but **trigger bodies are not executed** during DML operations. The examples below show how to define triggers, but their logic will not run automatically.
+### Triggers
 
 ```elixir
-# Create a BEFORE INSERT trigger (body will NOT execute on INSERT)
+# Create a BEFORE INSERT trigger - executes before each INSERT
 VibeDb.execute(db, """
   CREATE TRIGGER audit_insert
   BEFORE INSERT ON users
   FOR EACH ROW
   BEGIN
     INSERT INTO audit_log (action, table_name, timestamp)
-    VALUES ('INSERT', 'users', SYSDATE);
+    VALUES ('INSERT', 'users', 1);
   END;
 """)
 
-# Create an AFTER UPDATE trigger (body will NOT execute on UPDATE)
+# Create an AFTER UPDATE trigger with :OLD and :NEW row references
 VibeDb.execute(db, """
   CREATE TRIGGER audit_update
   AFTER UPDATE ON users
@@ -502,7 +499,7 @@ VibeDb.execute(db, """
   BEFORE INSERT OR UPDATE OR DELETE ON users
   FOR EACH ROW
   BEGIN
-    NULL;
+    INSERT INTO change_log (event) VALUES ('CHANGE');
   END;
 """)
 
@@ -512,7 +509,7 @@ VibeDb.execute(db, """
   BEFORE UPDATE OF salary ON employees
   FOR EACH ROW
   BEGIN
-    INSERT INTO salary_history VALUES (:OLD.salary, :NEW.salary, SYSDATE);
+    INSERT INTO salary_history (old_salary, new_salary) VALUES (:OLD.salary, :NEW.salary);
   END;
 """)
 
@@ -523,7 +520,7 @@ VibeDb.execute(db, """
   FOR EACH ROW
   WHEN (NEW.salary > 100000)
   BEGIN
-    RAISE_APPLICATION_ERROR(-20001, 'Salary exceeds limit');
+    INSERT INTO high_salary_log (salary) VALUES (:NEW.salary);
   END;
 """)
 
@@ -533,7 +530,7 @@ VibeDb.execute(db, """
   INSTEAD OF INSERT ON user_view
   FOR EACH ROW
   BEGIN
-    INSERT INTO users VALUES (:NEW.id, :NEW.name);
+    INSERT INTO users (id, name) VALUES (:NEW.id, :NEW.name);
   END;
 """)
 

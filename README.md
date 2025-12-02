@@ -43,7 +43,7 @@ An in-memory relational database implemented in Elixir that is compatible with V
 - `DROP PACKAGE` / `DROP PACKAGE BODY` - Remove packages or package bodies
 - Package procedures and functions
 
-### Triggers
+### Triggers (DDL Only - Execution Not Implemented)
 - `CREATE TRIGGER` / `CREATE OR REPLACE TRIGGER` - Create database triggers
 - `DROP TRIGGER` - Remove triggers
 - `ALTER TRIGGER ... ENABLE/DISABLE` - Enable or disable triggers
@@ -52,6 +52,8 @@ An in-memory relational database implemented in Elixir that is compatible with V
 - Support for INSERT, UPDATE, DELETE events
 - UPDATE OF column triggers
 - WHEN clause conditions
+
+> **⚠️ Important Limitation:** Trigger definitions can be created, modified, and stored, but **trigger bodies are not executed** during INSERT, UPDATE, or DELETE operations. This feature only supports DDL operations for trigger metadata management.
 
 ### DML (Data Manipulation Language)
 - `SELECT` - Query data with WHERE, ORDER BY, and column projections
@@ -467,10 +469,12 @@ VibeDb.execute(db, "DROP PACKAGE BODY user_pkg")
 VibeDb.execute(db, "DROP PACKAGE user_pkg")
 ```
 
-### Triggers
+### Triggers (DDL Only)
+
+> **⚠️ Note:** Trigger DDL statements (CREATE, DROP, ALTER) work for storing trigger metadata, but **trigger bodies are not executed** during DML operations. The examples below show how to define triggers, but their logic will not run automatically.
 
 ```elixir
-# Create a BEFORE INSERT trigger
+# Create a BEFORE INSERT trigger (body will NOT execute on INSERT)
 VibeDb.execute(db, """
   CREATE TRIGGER audit_insert
   BEFORE INSERT ON users
@@ -481,7 +485,7 @@ VibeDb.execute(db, """
   END;
 """)
 
-# Create an AFTER UPDATE trigger
+# Create an AFTER UPDATE trigger (body will NOT execute on UPDATE)
 VibeDb.execute(db, """
   CREATE TRIGGER audit_update
   AFTER UPDATE ON users

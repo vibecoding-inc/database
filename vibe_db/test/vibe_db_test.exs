@@ -1241,6 +1241,120 @@ defmodule VibeDbTest do
 
       assert {:ok, %{message: "Trigger STATEMENT_TRIGGER created"}} = result
     end
+
+    # Note: The following tests document that trigger execution is NOT implemented.
+    # Triggers can be defined but their bodies do not execute during DML operations.
+    # These tests are tagged as :trigger_execution_not_implemented to skip by default.
+
+    @tag :trigger_execution_not_implemented
+    test "BEFORE INSERT trigger body executes on INSERT", %{db: db} do
+      # Create an audit log table to track trigger execution
+      VibeDb.execute(db, "CREATE TABLE audit_log (action VARCHAR2(50), timestamp NUMBER)")
+
+      # Create a trigger that inserts into audit_log when inserting into trigger_test
+      VibeDb.execute(db, """
+        CREATE TRIGGER audit_insert_trigger
+        BEFORE INSERT ON trigger_test
+        FOR EACH ROW
+        BEGIN
+          INSERT INTO audit_log (action, timestamp) VALUES ('INSERT', 1);
+        END;
+      """)
+
+      # Insert into trigger_test - this should fire the trigger
+      VibeDb.execute(db, "INSERT INTO trigger_test (id, name) VALUES (1, 'Alice')")
+
+      # Check if the trigger executed by verifying audit_log has a record
+      {:ok, audit_rows} = VibeDb.execute(db, "SELECT * FROM audit_log")
+
+      # This assertion documents that trigger execution is NOT implemented
+      # Currently, audit_log will be empty because triggers don't actually execute
+      assert length(audit_rows) == 1, "Trigger body should have inserted a row into audit_log"
+    end
+
+    @tag :trigger_execution_not_implemented
+    test "AFTER UPDATE trigger body executes on UPDATE", %{db: db} do
+      # Create an audit log table
+      VibeDb.execute(db, "CREATE TABLE update_log (old_name VARCHAR2(100), new_name VARCHAR2(100))")
+
+      # Insert initial data
+      VibeDb.execute(db, "INSERT INTO trigger_test (id, name) VALUES (1, 'Alice')")
+
+      # Create an AFTER UPDATE trigger
+      VibeDb.execute(db, """
+        CREATE TRIGGER audit_update_trigger
+        AFTER UPDATE ON trigger_test
+        FOR EACH ROW
+        BEGIN
+          INSERT INTO update_log (old_name, new_name) VALUES (:OLD.name, :NEW.name);
+        END;
+      """)
+
+      # Update the row - this should fire the trigger
+      VibeDb.execute(db, "UPDATE trigger_test SET name = 'Bob' WHERE id = 1")
+
+      # Check if the trigger executed
+      {:ok, log_rows} = VibeDb.execute(db, "SELECT * FROM update_log")
+
+      # This assertion documents that trigger execution is NOT implemented
+      assert length(log_rows) == 1, "Trigger body should have logged the update"
+    end
+
+    @tag :trigger_execution_not_implemented
+    test "BEFORE DELETE trigger body executes on DELETE", %{db: db} do
+      # Create a delete log table
+      VibeDb.execute(db, "CREATE TABLE delete_log (deleted_id NUMBER)")
+
+      # Insert initial data
+      VibeDb.execute(db, "INSERT INTO trigger_test (id, name) VALUES (1, 'Alice')")
+
+      # Create a BEFORE DELETE trigger
+      VibeDb.execute(db, """
+        CREATE TRIGGER audit_delete_trigger
+        BEFORE DELETE ON trigger_test
+        FOR EACH ROW
+        BEGIN
+          INSERT INTO delete_log (deleted_id) VALUES (:OLD.id);
+        END;
+      """)
+
+      # Delete the row - this should fire the trigger
+      VibeDb.execute(db, "DELETE FROM trigger_test WHERE id = 1")
+
+      # Check if the trigger executed
+      {:ok, log_rows} = VibeDb.execute(db, "SELECT * FROM delete_log")
+
+      # This assertion documents that trigger execution is NOT implemented
+      assert length(log_rows) == 1, "Trigger body should have logged the deletion"
+    end
+
+    @tag :trigger_execution_not_implemented
+    test "disabled trigger does not execute", %{db: db} do
+      # Create an audit log table
+      VibeDb.execute(db, "CREATE TABLE disabled_log (action VARCHAR2(50))")
+
+      # Create and then disable a trigger
+      VibeDb.execute(db, """
+        CREATE TRIGGER disabled_trigger
+        BEFORE INSERT ON trigger_test
+        FOR EACH ROW
+        BEGIN
+          INSERT INTO disabled_log (action) VALUES ('TRIGGERED');
+        END;
+      """)
+
+      VibeDb.execute(db, "ALTER TRIGGER disabled_trigger DISABLE")
+
+      # Insert into trigger_test - disabled trigger should not fire
+      VibeDb.execute(db, "INSERT INTO trigger_test (id, name) VALUES (1, 'Alice')")
+
+      # Check that the disabled trigger did not execute
+      {:ok, log_rows} = VibeDb.execute(db, "SELECT * FROM disabled_log")
+
+      # Even though trigger execution is not implemented, this test documents
+      # that disabled triggers should definitely not execute
+      assert length(log_rows) == 0, "Disabled trigger should not execute"
+    end
   end
 
   describe "JOIN operations" do

@@ -81,12 +81,74 @@ An in-memory relational database implemented in Elixir that is compatible with O
 
 ## Installation
 
+### Using Nix (Recommended)
+
+If you have Nix with flakes enabled, you can run the database REPL directly:
+
+```bash
+nix run github:vibecoding-inc/database
+```
+
+Or enter a development shell:
+
+```bash
+nix develop
+cd oracle_db
+mix deps.get
+mix compile
+mix escript.build
+./oracle_db
+```
+
+### Manual Installation
+
 1. Make sure you have Elixir installed (1.14+)
 2. Navigate to the `oracle_db` directory
 3. Run `mix deps.get` to fetch dependencies
 4. Run `mix compile` to compile the project
+5. Run `mix escript.build` to build the REPL binary
+6. Run `./oracle_db` to start the REPL
 
-## Usage
+## Interactive REPL
+
+The database includes an interactive REPL (Read-Eval-Print Loop):
+
+```bash
+$ ./oracle_db
+OracleDb REPL v0.1.0
+Type .help for available commands, .exit to quit.
+
+oracle> CREATE TABLE users (id NUMBER, name VARCHAR2(100));
+OK: Table USERS created
+
+oracle> INSERT INTO users VALUES (1, 'Alice');
+OK: 1 row(s) affected
+
+oracle> SELECT * FROM users;
+| ID | NAME  |
++----+-------+
+| 1  | Alice |
+1 row(s) returned
+
+oracle> .tables
+Tables:
+  USERS
+
+oracle> .exit
+Goodbye!
+```
+
+### REPL Commands
+
+- `.help` - Show available commands
+- `.tables` - List all tables
+- `.schema <table>` - Show table schema
+- `.types` - List all user-defined types
+- `.views` - List all views
+- `.clear` - Clear the screen
+- `.exit` or `.quit` - Exit the REPL
+
+## Programmatic Usage
 
 ```elixir
 # Start the database

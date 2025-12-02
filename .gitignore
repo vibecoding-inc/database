@@ -1,0 +1,5 @@
+# Nix
+result
+.nix-mix
+.nix-hex
+.direnv

@@ -672,6 +672,66 @@ defmodule OracleDbTest do
       result = OracleDb.execute(db, "DROP VIEW nonexistent_view")
       assert {:error, _} = result
     end
+
+    test "SELECT * from view returns all rows", %{db: db} do
+      OracleDb.execute(db, "CREATE VIEW select_view AS SELECT id, name FROM base_table")
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM select_view")
+      assert length(rows) == 2
+      assert hd(rows)["id"] == 1
+      assert hd(rows)["name"] == "Alice"
+    end
+
+    test "SELECT specific columns from view", %{db: db} do
+      OracleDb.execute(db, "CREATE VIEW col_view AS SELECT id, name, value FROM base_table")
+      {:ok, rows} = OracleDb.execute(db, "SELECT name FROM col_view")
+      assert length(rows) == 2
+      assert Map.has_key?(hd(rows), "name")
+      refute Map.has_key?(hd(rows), "id")
+    end
+
+    test "SELECT from view with WHERE clause in outer query", %{db: db} do
+      OracleDb.execute(db, "CREATE VIEW where_view AS SELECT id, name, value FROM base_table")
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM where_view WHERE id = 1")
+      assert length(rows) == 1
+      assert hd(rows)["name"] == "Alice"
+    end
+
+    test "SELECT from view with WHERE clause in view definition", %{db: db} do
+      OracleDb.execute(
+        db,
+        "CREATE VIEW inner_where_view AS SELECT id, name FROM base_table WHERE value > 100"
+      )
+
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM inner_where_view")
+      assert length(rows) == 1
+      assert hd(rows)["name"] == "Bob"
+    end
+
+    test "SELECT from view with ORDER BY", %{db: db} do
+      OracleDb.execute(db, "CREATE VIEW order_view AS SELECT id, name FROM base_table")
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM order_view ORDER BY name DESC")
+      assert length(rows) == 2
+      assert hd(rows)["name"] == "Bob"
+    end
+
+    test "SELECT from view with combined WHERE and ORDER BY", %{db: db} do
+      OracleDb.execute(db, "INSERT INTO base_table VALUES (3, 'Charlie', 300)")
+      OracleDb.execute(db, "CREATE VIEW combo_view AS SELECT id, name, value FROM base_table")
+
+      {:ok, rows} =
+        OracleDb.execute(db, "SELECT name FROM combo_view WHERE value > 100 ORDER BY name ASC")
+
+      assert length(rows) == 2
+      assert hd(rows)["name"] == "Bob"
+      assert List.last(rows)["name"] == "Charlie"
+    end
+
+    test "SELECT from nested views", %{db: db} do
+      OracleDb.execute(db, "CREATE VIEW inner_view AS SELECT id, name FROM base_table")
+      OracleDb.execute(db, "CREATE VIEW outer_view AS SELECT id, name FROM inner_view")
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM outer_view")
+      assert length(rows) == 2
+    end
   end
 
   describe "Materialized Views" do
@@ -703,6 +763,50 @@ defmodule OracleDbTest do
     test "returns error for dropping non-existent materialized view", %{db: db} do
       result = OracleDb.execute(db, "DROP MATERIALIZED VIEW nonexistent_mv")
       assert {:error, _} = result
+    end
+
+    test "SELECT * from materialized view returns all rows", %{db: db} do
+      OracleDb.execute(db, "INSERT INTO mv_source VALUES (2, 'test2')")
+      OracleDb.execute(db, "CREATE MATERIALIZED VIEW mv_select AS SELECT id, data FROM mv_source")
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM mv_select")
+      assert length(rows) == 2
+    end
+
+    test "SELECT specific columns from materialized view", %{db: db} do
+      OracleDb.execute(db, "CREATE MATERIALIZED VIEW mv_cols AS SELECT id, data FROM mv_source")
+      {:ok, rows} = OracleDb.execute(db, "SELECT data FROM mv_cols")
+      assert length(rows) == 1
+      assert Map.has_key?(hd(rows), "data")
+      refute Map.has_key?(hd(rows), "id")
+    end
+
+    test "SELECT from materialized view with WHERE clause", %{db: db} do
+      OracleDb.execute(db, "INSERT INTO mv_source VALUES (2, 'test2')")
+      OracleDb.execute(db, "INSERT INTO mv_source VALUES (3, 'test3')")
+      OracleDb.execute(db, "CREATE MATERIALIZED VIEW mv_where AS SELECT id, data FROM mv_source")
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM mv_where WHERE id > 1")
+      assert length(rows) == 2
+    end
+
+    test "SELECT from materialized view with ORDER BY", %{db: db} do
+      OracleDb.execute(db, "INSERT INTO mv_source VALUES (2, 'aaa')")
+      OracleDb.execute(db, "CREATE MATERIALIZED VIEW mv_order AS SELECT id, data FROM mv_source")
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM mv_order ORDER BY data ASC")
+      assert length(rows) == 2
+      assert hd(rows)["data"] == "aaa"
+    end
+
+    test "SELECT from materialized view with combined WHERE and ORDER BY", %{db: db} do
+      OracleDb.execute(db, "INSERT INTO mv_source VALUES (2, 'banana')")
+      OracleDb.execute(db, "INSERT INTO mv_source VALUES (3, 'apple')")
+      OracleDb.execute(db, "CREATE MATERIALIZED VIEW mv_combo AS SELECT id, data FROM mv_source")
+
+      {:ok, rows} =
+        OracleDb.execute(db, "SELECT data FROM mv_combo WHERE id > 1 ORDER BY data ASC")
+
+      assert length(rows) == 2
+      assert hd(rows)["data"] == "apple"
+      assert List.last(rows)["data"] == "banana"
     end
   end
 

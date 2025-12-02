@@ -758,7 +758,8 @@ defmodule OracleDb.SqlParser do
 
         case remaining do
           ["AS" | select_rest] ->
-            case parse_select(["SELECT" | select_rest]) do
+            # select_rest starts with "SELECT", pass directly
+            case parse_select(select_rest) do
               {:select, select_info} ->
                 {:create_view,
                  %{
@@ -780,7 +781,8 @@ defmodule OracleDb.SqlParser do
 
       # Object-relational view without WITH OBJECT IDENTIFIER: CREATE VIEW name OF type_name AS SELECT ...
       [view_name, "OF", type_name, "AS" | rest] ->
-        case parse_select(["SELECT" | rest]) do
+        # rest starts with "SELECT", pass directly
+        case parse_select(rest) do
           {:select, select_info} ->
             {:create_view,
              %{
@@ -797,7 +799,8 @@ defmodule OracleDb.SqlParser do
 
       [view_name, "AS" | rest] ->
         # Parse the SELECT statement that defines the view
-        case parse_select(["SELECT" | rest]) do
+        # rest should start with "SELECT" already, so pass it directly
+        case parse_select(rest) do
           {:select, select_info} ->
             {:create_view,
              %{
@@ -816,7 +819,8 @@ defmodule OracleDb.SqlParser do
 
         case remaining do
           ["AS" | select_rest] ->
-            case parse_select(["SELECT" | select_rest]) do
+            # select_rest starts with "SELECT", pass directly
+            case parse_select(select_rest) do
               {:select, select_info} ->
                 {:create_view,
                  %{
@@ -863,7 +867,8 @@ defmodule OracleDb.SqlParser do
   defp parse_create_materialized_view(tokens) do
     case tokens do
       [view_name, "AS" | rest] ->
-        case parse_select(["SELECT" | rest]) do
+        # rest starts with "SELECT", pass directly
+        case parse_select(rest) do
           {:select, select_info} ->
             {:create_materialized_view,
              %{

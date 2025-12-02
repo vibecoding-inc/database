@@ -320,7 +320,15 @@ defmodule OracleDb.Repl do
   defp process_input(db, sql) do
     # Collect multi-line SQL until we get a semicolon
     sql = collect_multiline_sql(sql)
-    sql = String.trim_trailing(sql, ";")
+    
+    # Don't trim the trailing semicolon for PL/SQL blocks - they need it for proper parsing
+    # The SqlParser will handle trimming the semicolon after validation
+    sql = 
+      if OracleDb.SqlParser.is_plsql_block?(String.trim(sql)) do
+        sql
+      else
+        String.trim_trailing(sql, ";")
+      end
 
     execute_sql(db, sql)
     :continue

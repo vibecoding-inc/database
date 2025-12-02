@@ -5,6 +5,7 @@ defmodule OracleDb.QueryExecutor do
 
   alias OracleDb.SqlParser
   alias OracleDb.Storage
+  alias OracleDb.PlsqlInterpreter
 
   @type result :: {:ok, any()} | {:error, String.t()}
 
@@ -412,11 +413,90 @@ defmodule OracleDb.QueryExecutor do
     end
   end
 
+  # CALL statement - execute a stored procedure
+  def execute_parsed(storage, {:call, info}) do
+    proc_name = String.upcase(info.name)
+    args = resolve_call_arguments(info.arguments)
+
+    case PlsqlInterpreter.execute_procedure(storage, proc_name, args) do
+      {:ok, result} ->
+        {:ok,
+         %{
+           message: "Procedure #{proc_name} executed",
+           output: result.output,
+           out_params: result.out_params
+         }}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # EXECUTE/EXEC statement - execute a stored procedure or function
+  def execute_parsed(storage, {:execute, info}) do
+    name = String.upcase(info.name)
+    args = resolve_call_arguments(info.arguments)
+
+    # Try procedure first, then function
+    case PlsqlInterpreter.execute_procedure(storage, name, args) do
+      {:ok, result} ->
+        {:ok,
+         %{
+           message: "Procedure #{name} executed",
+           output: result.output,
+           out_params: result.out_params
+         }}
+
+      {:error, "Procedure " <> _} ->
+        # Try as function
+        case PlsqlInterpreter.execute_function(storage, name, args) do
+          {:ok, return_value} ->
+            {:ok,
+             %{
+               message: "Function #{name} executed",
+               return_value: return_value
+             }}
+
+          {:error, _} = err ->
+            err
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # Anonymous PL/SQL block
+  def execute_parsed(storage, {:anonymous_block, info}) do
+    case PlsqlInterpreter.execute(storage, info.body) do
+      {:ok, result} ->
+        {:ok,
+         %{
+           message: "PL/SQL block executed",
+           output: result.output,
+           return_value: result.return_value
+         }}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   def execute_parsed(_storage, {:error, _} = error) do
     error
   end
 
   def execute_parsed(_storage, unknown) do
     {:error, "Unknown statement type: #{inspect(unknown)}"}
+  end
+
+  # Resolve call arguments to actual values
+  defp resolve_call_arguments(args) do
+    Enum.map(args, fn
+      {:literal, value} -> value
+      {:identifier, _name} -> nil  # Identifiers would need context to resolve
+      {:bind_var, _name} -> nil    # Bind variables would need context to resolve
+      other -> other
+    end)
   end
 end

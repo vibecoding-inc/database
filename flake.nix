@@ -27,21 +27,20 @@
           
           # Set environment variables for Elixir/Mix
           MIX_ENV = "prod";
-          MIX_HOME = "$TMPDIR/mix";
-          HEX_HOME = "$TMPDIR/hex";
+          LANG = "C.UTF-8";
+          LC_ALL = "C.UTF-8";
           
           configurePhase = ''
             export MIX_HOME=$TMPDIR/mix
             export HEX_HOME=$TMPDIR/hex
             mkdir -p $MIX_HOME $HEX_HOME
-            
-            # Install hex and rebar locally
-            mix local.hex --force
-            mix local.rebar --force
           '';
           
           buildPhase = ''
-            mix deps.get --only prod
+            export MIX_HOME=$TMPDIR/mix
+            export HEX_HOME=$TMPDIR/hex
+            
+            # Project has no external dependencies, compile directly
             mix compile
             mix escript.build
           '';

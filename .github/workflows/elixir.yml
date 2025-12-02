@@ -1,0 +1,50 @@
+name: Elixir Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: oracle_db
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.17'
+          otp-version: '27'
+
+      - name: Restore dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: oracle_db/deps
+          key: ${{ runner.os }}-mix-${{ hashFiles('oracle_db/mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile
+        run: mix compile --warnings-as-errors
+
+      - name: Run tests
+        run: mix test
+
+      - name: Build escript
+        run: mix escript.build
+
+      - name: Upload compiled artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle_db-escript
+          path: oracle_db/oracle_db
+          retention-days: 7

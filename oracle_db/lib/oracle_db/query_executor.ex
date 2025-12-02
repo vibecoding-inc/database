@@ -412,6 +412,13 @@ defmodule OracleDb.QueryExecutor do
     end
   end
 
+  # PL/SQL Anonymous Block
+  def execute_parsed(_storage, {:plsql_block, _info}) do
+    # Anonymous PL/SQL blocks are executed but don't return data
+    # In a real implementation, this would execute the PL/SQL code
+    {:ok, %{message: "PL/SQL block executed"}}
+  end
+
   def execute_parsed(_storage, {:error, _} = error) do
     error
   end

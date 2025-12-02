@@ -85,8 +85,47 @@ defmodule OracleDb.SqlParser do
       "CREATE" -> parse_create(tokens)
       "DROP" -> parse_drop(tokens)
       "ALTER" -> parse_alter(tokens)
+      "DECLARE" -> parse_plsql_block(tokens)
+      "BEGIN" -> parse_plsql_block(tokens)
       _ -> {:error, "Unknown SQL command: #{hd(tokens)}"}
     end
+  end
+
+  # Parse anonymous PL/SQL block (DECLARE/BEGIN)
+  defp parse_plsql_block(tokens) do
+    # Collect the entire PL/SQL block
+    {body, _remaining} = collect_plsql_block(tokens, [], 0)
+    {:plsql_block, %{body: body}}
+  end
+
+  defp collect_plsql_block([], acc, _depth) do
+    {Enum.reverse(acc) |> Enum.join(" "), []}
+  end
+
+  defp collect_plsql_block([token | rest], acc, depth) when is_binary(token) do
+    case String.upcase(token) do
+      "BEGIN" ->
+        collect_plsql_block(rest, [token | acc], depth + 1)
+
+      "END" ->
+        if depth <= 1 do
+          # End of block
+          {Enum.reverse([token | acc]) |> Enum.join(" "), rest}
+        else
+          collect_plsql_block(rest, [token | acc], depth - 1)
+        end
+
+      _ ->
+        collect_plsql_block(rest, [token | acc], depth)
+    end
+  end
+
+  defp collect_plsql_block([{:string, s} | rest], acc, depth) do
+    collect_plsql_block(rest, ["'#{s}'" | acc], depth)
+  end
+
+  defp collect_plsql_block([token | rest], acc, depth) do
+    collect_plsql_block(rest, [inspect(token) | acc], depth)
   end
 
   # Parse SELECT statement
@@ -792,7 +831,17 @@ defmodule OracleDb.SqlParser do
 
       [view_name, "AS" | rest] ->
         # Parse the SELECT statement that defines the view
-        case parse_select(["SELECT" | rest]) do
+        # rest might already start with SELECT, or we need to prepend it
+        select_tokens =
+          case rest do
+            [first | _] when is_binary(first) ->
+              if String.upcase(first) == "SELECT", do: rest, else: ["SELECT" | rest]
+
+            _ ->
+              ["SELECT" | rest]
+          end
+
+        case parse_select(select_tokens) do
           {:select, select_info} ->
             {:create_view,
              %{
@@ -811,7 +860,17 @@ defmodule OracleDb.SqlParser do
 
         case remaining do
           ["AS" | select_rest] ->
-            case parse_select(["SELECT" | select_rest]) do
+            # select_rest might already start with SELECT
+            select_tokens =
+              case select_rest do
+                [first | _] when is_binary(first) ->
+                  if String.upcase(first) == "SELECT", do: select_rest, else: ["SELECT" | select_rest]
+
+                _ ->
+                  ["SELECT" | select_rest]
+              end
+
+            case parse_select(select_tokens) do
               {:select, select_info} ->
                 {:create_view,
                  %{

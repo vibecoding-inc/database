@@ -1204,7 +1204,50 @@ defmodule OracleDb.Storage do
         {:ok, projected}
 
       :error ->
-        {:error, "Table #{table_name} does not exist"}
+        # Check if it's a view
+        case Map.fetch(state.views, table_name) do
+          {:ok, view_def} ->
+            # Execute the view's underlying query
+            execute_view_query(state, view_def, columns, where, order_by)
+
+          :error ->
+            {:error, "Table #{table_name} does not exist"}
+        end
+    end
+  end
+
+  defp execute_view_query(state, view_def, _select_columns, _where, _order_by) do
+    # Get the view's underlying query definition
+    query = Map.get(view_def, :query)
+
+    if query do
+      # Execute the view's query against the underlying table
+      source_table = query.table
+
+      if source_table do
+        normalized_source = normalize_name(source_table)
+
+        case Map.fetch(state.data, normalized_source) do
+          {:ok, rows} ->
+            # Apply the view's WHERE filter
+            filtered = filter_rows(rows, query.where)
+
+            # Apply the view's ORDER BY
+            sorted = sort_rows(filtered, query.order_by)
+
+            # Project the view's columns
+            projected = project_columns(sorted, query.columns)
+
+            {:ok, projected}
+
+          :error ->
+            {:error, "Underlying table #{source_table} does not exist"}
+        end
+      else
+        {:ok, []}
+      end
+    else
+      {:ok, []}
     end
   end
 
@@ -1319,13 +1362,20 @@ defmodule OracleDb.Storage do
   defp parse_token_value(val), do: val
 
   defp get_column_value(row, column) when is_binary(column) do
+    # Handle table alias prefixes like "x.name" -> "name"
+    actual_column =
+      case String.split(column, ".", parts: 2) do
+        [_alias, col] -> col
+        [col] -> col
+      end
+
     # Try exact match first, then case-insensitive
-    case Map.fetch(row, column) do
+    case Map.fetch(row, actual_column) do
       {:ok, val} ->
         val
 
       :error ->
-        upcase_col = String.upcase(column)
+        upcase_col = String.upcase(actual_column)
 
         Enum.find_value(row, fn {k, v} ->
           if String.upcase(to_string(k)) == upcase_col, do: v

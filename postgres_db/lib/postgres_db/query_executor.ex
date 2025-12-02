@@ -88,7 +88,6 @@ defmodule PostgresDb.QueryExecutor do
     }
 
     if_not_exists = Map.get(info, :if_not_exists, false)
-    _table_name = String.downcase(info.table)
 
     case Storage.create_table(storage, info.table, schema, if_not_exists) do
       :ok ->

@@ -1,6 +1,6 @@
 # PostgreSQL-Compatible Relational Database
 
-An in-memory relational database implemented in Elixir that is compatible with PostgreSQL SQL syntax (Protocol Version 3).
+An in-memory relational database implemented in Elixir that is compatible with PostgreSQL SQL syntax.
 
 ## Features
 

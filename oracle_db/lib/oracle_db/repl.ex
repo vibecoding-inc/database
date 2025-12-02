@@ -146,7 +146,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".types") do
-    types = OracleDb.Storage.list_types(get_storage(db))
+    types = OracleDb.list_types(db)
 
     if length(types) == 0 do
       IO.puts("No types.")
@@ -159,7 +159,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".views") do
-    views = OracleDb.Storage.list_views(get_storage(db))
+    views = OracleDb.list_views(db)
 
     if length(views) == 0 do
       IO.puts("No views.")
@@ -338,13 +338,5 @@ defmodule OracleDb.Repl do
       SELECT * FROM users;
       SELECT SYSDATE FROM DUAL;
     """)
-  end
-
-  # Helper to get the storage process from the db GenServer state
-  # This is a workaround since we don't expose storage directly
-  defp get_storage(db) do
-    # Use :sys.get_state to inspect the GenServer state
-    state = :sys.get_state(db)
-    state.storage
   end
 end

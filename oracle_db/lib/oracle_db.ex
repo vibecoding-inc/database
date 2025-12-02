@@ -161,6 +161,32 @@ defmodule OracleDb do
     GenServer.call(server, :reset)
   end
 
+  @doc """
+  Lists all user-defined types in the database.
+
+  ## Examples
+
+      types = OracleDb.list_types(db)
+
+  """
+  @spec list_types(server()) :: [String.t()]
+  def list_types(server) do
+    GenServer.call(server, :list_types)
+  end
+
+  @doc """
+  Lists all views in the database.
+
+  ## Examples
+
+      views = OracleDb.list_views(db)
+
+  """
+  @spec list_views(server()) :: [String.t()]
+  def list_views(server) do
+    GenServer.call(server, :list_views)
+  end
+
   # Server Callbacks
 
   @impl true
@@ -216,5 +242,17 @@ defmodule OracleDb do
   def handle_call(:reset, _from, state) do
     result = Storage.reset(state.storage)
     {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call(:list_types, _from, state) do
+    types = Storage.list_types(state.storage)
+    {:reply, types, state}
+  end
+
+  @impl true
+  def handle_call(:list_views, _from, state) do
+    views = Storage.list_views(state.storage)
+    {:reply, views, state}
   end
 end

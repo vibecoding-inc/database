@@ -85,6 +85,11 @@ defmodule OracleDb.SqlParser do
       "CREATE" -> parse_create(tokens)
       "DROP" -> parse_drop(tokens)
       "ALTER" -> parse_alter(tokens)
+      "CALL" -> parse_call(tokens)
+      "EXECUTE" -> parse_execute(tokens)
+      "EXEC" -> parse_execute(tokens)
+      "BEGIN" -> parse_anonymous_block(tokens)
+      "DECLARE" -> parse_anonymous_block(tokens)
       _ -> {:error, "Unknown SQL command: #{hd(tokens)}"}
     end
   end
@@ -2256,5 +2261,120 @@ defmodule OracleDb.SqlParser do
       nil -> nil
       idx -> {Enum.take(tokens, idx), Enum.drop(tokens, idx + 1)}
     end
+  end
+
+  # Parse CALL statement - CALL procedure_name(arg1, arg2, ...)
+  defp parse_call(["CALL" | rest]) do
+    parse_call(rest)
+  end
+
+  defp parse_call([proc_name | rest]) do
+    {args, _remaining} = parse_call_arguments(rest)
+
+    {:call,
+     %{
+       name: proc_name,
+       arguments: args
+     }}
+  end
+
+  defp parse_call([]) do
+    {:error, "Invalid CALL syntax - missing procedure name"}
+  end
+
+  # Parse EXECUTE/EXEC statement
+  defp parse_execute(["EXECUTE" | rest]) do
+    parse_execute_rest(rest)
+  end
+
+  defp parse_execute(["EXEC" | rest]) do
+    parse_execute_rest(rest)
+  end
+
+  defp parse_execute_rest([proc_name | rest]) do
+    # Check for function vs procedure
+    {args, _remaining} = parse_call_arguments(rest)
+
+    {:execute,
+     %{
+       name: proc_name,
+       arguments: args
+     }}
+  end
+
+  defp parse_execute_rest([]) do
+    {:error, "Invalid EXECUTE syntax - missing procedure/function name"}
+  end
+
+  # Parse call arguments (arg1, arg2, ...)
+  defp parse_call_arguments(["(" | rest]) do
+    parse_call_args_list(rest, [])
+  end
+
+  defp parse_call_arguments(_rest) do
+    {[], []}
+  end
+
+  defp parse_call_args_list([")" | rest], acc) do
+    {Enum.reverse(acc), rest}
+  end
+
+  defp parse_call_args_list(["," | rest], acc) do
+    parse_call_args_list(rest, acc)
+  end
+
+  defp parse_call_args_list([{:string, val} | rest], acc) do
+    parse_call_args_list(rest, [{:literal, val} | acc])
+  end
+
+  defp parse_call_args_list([token | rest], acc) when is_binary(token) do
+    value =
+      cond do
+        String.upcase(token) == "NULL" ->
+          {:literal, nil}
+
+        String.match?(token, ~r/^\d+$/) ->
+          {:literal, String.to_integer(token)}
+
+        String.match?(token, ~r/^\d+\.\d+$/) ->
+          {:literal, String.to_float(token)}
+
+        String.upcase(token) == "TRUE" ->
+          {:literal, true}
+
+        String.upcase(token) == "FALSE" ->
+          {:literal, false}
+
+        String.starts_with?(token, ":") ->
+          # Bind variable reference
+          {:bind_var, String.slice(token, 1..-1//1)}
+
+        true ->
+          # Could be identifier/variable
+          {:identifier, token}
+      end
+
+    parse_call_args_list(rest, [value | acc])
+  end
+
+  defp parse_call_args_list([], acc) do
+    {Enum.reverse(acc), []}
+  end
+
+  # Parse anonymous PL/SQL block - BEGIN ... END or DECLARE ... BEGIN ... END
+  defp parse_anonymous_block(tokens) do
+    # Reconstruct the original text with proper spacing
+    body =
+      tokens
+      |> Enum.map(fn
+        {:string, val} -> "'#{val}'"
+        token -> token
+      end)
+      |> Enum.join(" ")
+
+    {:anonymous_block,
+     %{
+       body: body
+     }}
   end
 end

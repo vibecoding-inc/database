@@ -2,6 +2,9 @@ defmodule OracleDb.XmlStorage do
   @moduledoc """
   XML persistence layer for the Oracle-compatible database.
   Handles serializing and deserializing the complete database state to/from XML files.
+  
+  Complex data structures are serialized using Erlang's binary format encoded as base64,
+  which provides safe deserialization without allowing arbitrary code execution.
   """
 
   @default_filename "database.xml"
@@ -44,6 +47,25 @@ defmodule OracleDb.XmlStorage do
   """
   @spec default_filename() :: String.t()
   def default_filename, do: @default_filename
+
+  # Safe term encoding/decoding using binary format with base64
+  # This prevents arbitrary code execution when loading untrusted XML files
+  
+  defp encode_term(term) do
+    term
+    |> :erlang.term_to_binary()
+    |> Base.encode64()
+  end
+
+  defp decode_term(base64_str) do
+    try do
+      base64_str
+      |> Base.decode64!()
+      |> :erlang.binary_to_term([:safe])
+    rescue
+      ArgumentError -> nil
+    end
+  end
 
   # Serialization functions
 
@@ -133,7 +155,7 @@ defmodule OracleDb.XmlStorage do
         :primary_key -> ~s(primary_key="true")
         :not_null -> ~s(not_null="true")
         :null -> ""
-        {:default, val} -> ~s(default="#{escape_xml(inspect(val))}")
+        {:default, val} -> ~s(default="#{encode_term(val)}")
         _ -> ""
       end)
       |> Enum.filter(&(&1 != ""))
@@ -145,7 +167,7 @@ defmodule OracleDb.XmlStorage do
   defp serialize_constraints(constraints) do
     constraints
     |> Enum.map(fn constraint ->
-      ~s(        <constraint>#{escape_xml(inspect(constraint))}</constraint>)
+      ~s(        <constraint>#{encode_term(constraint)}</constraint>)
     end)
     |> Enum.join("\n")
   end
@@ -265,7 +287,7 @@ defmodule OracleDb.XmlStorage do
   defp serialize_type_methods(methods) do
     methods
     |> Enum.map(fn method ->
-      ~s(        <method>#{escape_xml(inspect(method))}</method>)
+      ~s(        <method>#{encode_term(method)}</method>)
     end)
     |> Enum.join("\n")
   end
@@ -288,12 +310,12 @@ defmodule OracleDb.XmlStorage do
     oid = Map.get(view_def, :object_identifier)
 
     of_type_attr = if of_type, do: ~s( of_type="#{escape_xml(of_type)}"), else: ""
-    oid_attr = if oid, do: ~s( object_identifier="#{escape_xml(inspect(oid))}"), else: ""
+    oid_attr = if oid, do: ~s( object_identifier="#{encode_term(oid)}"), else: ""
 
     """
         <view name="#{escape_xml(name)}"#{of_type_attr}#{oid_attr}>
-          <columns>#{escape_xml(inspect(columns))}</columns>
-          <query>#{escape_xml(inspect(query))}</query>
+          <columns>#{encode_term(columns)}</columns>
+          <query>#{encode_term(query)}</query>
         </view>
     """
     |> String.trim_trailing()
@@ -307,7 +329,7 @@ defmodule OracleDb.XmlStorage do
 
         """
             <materialized_view name="#{escape_xml(name)}">
-              <query>#{escape_xml(inspect(query))}</query>
+              <query>#{encode_term(query)}</query>
             </materialized_view>
         """
         |> String.trim_trailing()
@@ -326,7 +348,7 @@ defmodule OracleDb.XmlStorage do
 
         """
             <procedure name="#{escape_xml(name)}">
-              <parameters>#{escape_xml(inspect(params))}</parameters>
+              <parameters>#{encode_term(params)}</parameters>
               <body><![CDATA[#{body}]]></body>
             </procedure>
         """
@@ -346,8 +368,8 @@ defmodule OracleDb.XmlStorage do
         body = Map.get(func_def, :body, "")
 
         """
-            <function name="#{escape_xml(name)}" return_type="#{escape_xml(inspect(return_type))}">
-              <parameters>#{escape_xml(inspect(params))}</parameters>
+            <function name="#{escape_xml(name)}" return_type="#{encode_term(return_type)}">
+              <parameters>#{encode_term(params)}</parameters>
               <body><![CDATA[#{body}]]></body>
             </function>
         """
@@ -365,11 +387,11 @@ defmodule OracleDb.XmlStorage do
         spec = Map.get(pkg_def, :spec, %{})
         body = Map.get(pkg_def, :body)
 
-        body_xml = if body, do: ~s(<body>#{escape_xml(inspect(body))}</body>), else: ""
+        body_xml = if body, do: ~s(<body>#{encode_term(body)}</body>), else: ""
 
         """
             <package name="#{escape_xml(name)}">
-              <spec>#{escape_xml(inspect(spec))}</spec>
+              <spec>#{encode_term(spec)}</spec>
               #{body_xml}
             </package>
         """
@@ -393,11 +415,11 @@ defmodule OracleDb.XmlStorage do
         when_clause = Map.get(trigger_def, :when)
 
         when_xml =
-          if when_clause, do: ~s(<when>#{escape_xml(inspect(when_clause))}</when>), else: ""
+          if when_clause, do: ~s(<when>#{encode_term(when_clause)}</when>), else: ""
 
         """
             <trigger name="#{escape_xml(name)}" timing="#{escape_xml(to_string(timing))}" table="#{escape_xml(to_string(table))}" level="#{escape_xml(to_string(level))}" enabled="#{enabled}">
-              <events>#{escape_xml(inspect(events))}</events>
+              <events>#{encode_term(events)}</events>
               #{when_xml}
               <body><![CDATA[#{body}]]></body>
             </trigger>
@@ -556,7 +578,8 @@ defmodule OracleDb.XmlStorage do
 
     mods =
       if default_match do
-        [{:default, unescape_xml(Enum.at(default_match, 1))} | mods]
+        default_val = decode_term(unescape_xml(Enum.at(default_match, 1)))
+        [{:default, default_val} | mods]
       else
         mods
       end
@@ -595,15 +618,10 @@ defmodule OracleDb.XmlStorage do
         dt
 
       true ->
-        # Try to parse as inspected term
-        case Regex.run(~r/<(?:list|map|raw)>(.*)<\/(?:list|map|raw)>/s, xml) do
+        # Try to parse base64-encoded term first
+        case Regex.run(~r/<(?:list|map|raw)>([^<]*)<\/(?:list|map|raw)>/s, xml) do
           [_, val] ->
-            try do
-              {term, _} = Code.eval_string(unescape_xml(val))
-              term
-            rescue
-              _ -> unescape_xml(val)
-            end
+            decode_term(unescape_xml(val))
 
           nil ->
             nil
@@ -711,44 +729,13 @@ defmodule OracleDb.XmlStorage do
         of_type = if of_type_match, do: Enum.at(of_type_match, 1)
 
         oid_match = Regex.run(~r/object_identifier="([^"]*)"/, attrs)
-
-        oid =
-          if oid_match do
-            try do
-              {term, _} = Code.eval_string(unescape_xml(Enum.at(oid_match, 1)))
-              term
-            rescue
-              _ -> nil
-            end
-          end
+        oid = if oid_match, do: decode_term(unescape_xml(Enum.at(oid_match, 1)))
 
         columns_match = Regex.run(~r/<columns>([^<]*)<\/columns>/, content)
-
-        columns =
-          if columns_match do
-            try do
-              {term, _} = Code.eval_string(unescape_xml(Enum.at(columns_match, 1)))
-              term
-            rescue
-              _ -> []
-            end
-          else
-            []
-          end
+        columns = if columns_match, do: decode_term(unescape_xml(Enum.at(columns_match, 1))) || [], else: []
 
         query_match = Regex.run(~r/<query>([^<]*)<\/query>/, content)
-
-        query =
-          if query_match do
-            try do
-              {term, _} = Code.eval_string(unescape_xml(Enum.at(query_match, 1)))
-              term
-            rescue
-              _ -> %{}
-            end
-          else
-            %{}
-          end
+        query = if query_match, do: decode_term(unescape_xml(Enum.at(query_match, 1))) || %{}, else: %{}
 
         view_def =
           %{
@@ -778,18 +765,7 @@ defmodule OracleDb.XmlStorage do
       Regex.scan(mv_regex, xml)
       |> Enum.map(fn [_, name, content] ->
         query_match = Regex.run(~r/<query>([^<]*)<\/query>/, content)
-
-        query =
-          if query_match do
-            try do
-              {term, _} = Code.eval_string(unescape_xml(Enum.at(query_match, 1)))
-              term
-            rescue
-              _ -> %{}
-            end
-          else
-            %{}
-          end
+        query = if query_match, do: decode_term(unescape_xml(Enum.at(query_match, 1))) || %{}, else: %{}
 
         {name, %{query: query}}
       end)
@@ -805,18 +781,7 @@ defmodule OracleDb.XmlStorage do
       Regex.scan(proc_regex, xml)
       |> Enum.map(fn [_, name, content] ->
         params_match = Regex.run(~r/<parameters>([^<]*)<\/parameters>/, content)
-
-        params =
-          if params_match do
-            try do
-              {term, _} = Code.eval_string(unescape_xml(Enum.at(params_match, 1)))
-              term
-            rescue
-              _ -> []
-            end
-          else
-            []
-          end
+        params = if params_match, do: decode_term(unescape_xml(Enum.at(params_match, 1))) || [], else: []
 
         body_match = Regex.run(~r/<body><!\[CDATA\[(.*?)\]\]><\/body>/s, content)
         body = if body_match, do: Enum.at(body_match, 1), else: ""
@@ -834,27 +799,10 @@ defmodule OracleDb.XmlStorage do
     functions =
       Regex.scan(func_regex, xml)
       |> Enum.map(fn [_, name, return_type_str, content] ->
-        return_type =
-          try do
-            {term, _} = Code.eval_string(unescape_xml(return_type_str))
-            term
-          rescue
-            _ -> return_type_str
-          end
+        return_type = decode_term(unescape_xml(return_type_str)) || return_type_str
 
         params_match = Regex.run(~r/<parameters>([^<]*)<\/parameters>/, content)
-
-        params =
-          if params_match do
-            try do
-              {term, _} = Code.eval_string(unescape_xml(Enum.at(params_match, 1)))
-              term
-            rescue
-              _ -> []
-            end
-          else
-            []
-          end
+        params = if params_match, do: decode_term(unescape_xml(Enum.at(params_match, 1))) || [], else: []
 
         body_match = Regex.run(~r/<body><!\[CDATA\[(.*?)\]\]><\/body>/s, content)
         body = if body_match, do: Enum.at(body_match, 1), else: ""
@@ -873,32 +821,10 @@ defmodule OracleDb.XmlStorage do
       Regex.scan(pkg_regex, xml)
       |> Enum.map(fn [_, name, content] ->
         spec_match = Regex.run(~r/<spec>([^<]*)<\/spec>/, content)
-
-        spec =
-          if spec_match do
-            try do
-              {term, _} = Code.eval_string(unescape_xml(Enum.at(spec_match, 1)))
-              term
-            rescue
-              _ -> %{}
-            end
-          else
-            %{}
-          end
+        spec = if spec_match, do: decode_term(unescape_xml(Enum.at(spec_match, 1))) || %{}, else: %{}
 
         body_match = Regex.run(~r/<body>([^<]*)<\/body>/, content)
-
-        body =
-          if body_match do
-            try do
-              {term, _} = Code.eval_string(unescape_xml(Enum.at(body_match, 1)))
-              term
-            rescue
-              _ -> nil
-            end
-          else
-            nil
-          end
+        body = if body_match, do: decode_term(unescape_xml(Enum.at(body_match, 1))), else: nil
 
         pkg_def = %{spec: spec}
         pkg_def = if body, do: Map.put(pkg_def, :body, body), else: pkg_def
@@ -918,32 +844,10 @@ defmodule OracleDb.XmlStorage do
       Regex.scan(trig_regex, xml)
       |> Enum.map(fn [_, name, timing, table, level, enabled, content] ->
         events_match = Regex.run(~r/<events>([^<]*)<\/events>/, content)
-
-        events =
-          if events_match do
-            try do
-              {term, _} = Code.eval_string(unescape_xml(Enum.at(events_match, 1)))
-              term
-            rescue
-              _ -> []
-            end
-          else
-            []
-          end
+        events = if events_match, do: decode_term(unescape_xml(Enum.at(events_match, 1))) || [], else: []
 
         when_match = Regex.run(~r/<when>([^<]*)<\/when>/, content)
-
-        when_clause =
-          if when_match do
-            try do
-              {term, _} = Code.eval_string(unescape_xml(Enum.at(when_match, 1)))
-              term
-            rescue
-              _ -> nil
-            end
-          else
-            nil
-          end
+        when_clause = if when_match, do: decode_term(unescape_xml(Enum.at(when_match, 1))), else: nil
 
         body_match = Regex.run(~r/<body><!\[CDATA\[(.*?)\]\]><\/body>/s, content)
         body = if body_match, do: Enum.at(body_match, 1), else: ""

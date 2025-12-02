@@ -1224,34 +1224,44 @@ defmodule OracleDb.Storage do
   end
 
   # Execute SELECT on a view by running the underlying query
-  defp execute_view_select(state, view_def, columns, where, order_by) do
+  # Uses visited_views set to prevent circular references causing infinite recursion
+  defp execute_view_select(state, view_def, columns, where, order_by, visited_views \\ MapSet.new()) do
     # Get the view's underlying query
     query = Map.get(view_def, :query)
+    view_name = Map.get(view_def, :name)
 
     if query do
-      # Execute the underlying query
-      # Normalize the table name to uppercase to match how tables are stored
+      # Check for circular reference
       underlying_table = normalize_name(Map.get(query, :table))
-      underlying_columns = Map.get(query, :columns)
-      underlying_where = Map.get(query, :where)
-      underlying_order_by = Map.get(query, :order_by)
 
-      case execute_select(state, underlying_table, underlying_columns, underlying_where, underlying_order_by) do
-        {:ok, base_rows} ->
-          # Apply additional WHERE filter from outer query
-          filtered = filter_rows(base_rows, where)
+      if MapSet.member?(visited_views, underlying_table) do
+        {:error, "Circular view reference detected: #{underlying_table}"}
+      else
+        # Add current view to visited set for cycle detection
+        new_visited = if view_name, do: MapSet.put(visited_views, normalize_name(view_name)), else: visited_views
 
-          # Apply ORDER BY from outer query (overrides underlying if present)
-          sorted = if order_by, do: sort_rows(filtered, order_by), else: filtered
+        # Execute the underlying query
+        underlying_columns = Map.get(query, :columns)
+        underlying_where = Map.get(query, :where)
+        underlying_order_by = Map.get(query, :order_by)
 
-          # Apply column projection from outer query
-          # If columns is [{:all, "*"}], return all columns from the view
-          projected = project_view_columns(sorted, columns, view_def)
+        case execute_select_with_cycle_detection(state, underlying_table, underlying_columns, underlying_where, underlying_order_by, new_visited) do
+          {:ok, base_rows} ->
+            # Apply additional WHERE filter from outer query
+            filtered = filter_rows(base_rows, where)
 
-          {:ok, projected}
+            # Apply ORDER BY from outer query (overrides underlying if present)
+            sorted = if order_by, do: sort_rows(filtered, order_by), else: filtered
 
-        error ->
-          error
+            # Apply column projection from outer query
+            # If columns is [{:all, "*"}], return all columns from the view
+            projected = project_view_columns(sorted, columns, view_def)
+
+            {:ok, projected}
+
+          error ->
+            error
+        end
       end
     else
       {:error, "View has no underlying query defined"}
@@ -1259,36 +1269,82 @@ defmodule OracleDb.Storage do
   end
 
   # Execute SELECT on a materialized view
-  defp execute_materialized_view_select(state, mv_def, columns, where, order_by) do
+  # Note: Current implementation re-executes the underlying query.
+  # A production implementation would use cached/materialized data for performance.
+  defp execute_materialized_view_select(state, mv_def, columns, where, order_by, visited_views \\ MapSet.new()) do
     # Get the materialized view's underlying query
     query = Map.get(mv_def, :query)
+    view_name = Map.get(mv_def, :name)
 
     if query do
-      # Execute the underlying query (in a real implementation, this would use cached data)
-      # Normalize the table name to uppercase to match how tables are stored
+      # Check for circular reference
       underlying_table = normalize_name(Map.get(query, :table))
-      underlying_columns = Map.get(query, :columns)
-      underlying_where = Map.get(query, :where)
-      underlying_order_by = Map.get(query, :order_by)
 
-      case execute_select(state, underlying_table, underlying_columns, underlying_where, underlying_order_by) do
-        {:ok, base_rows} ->
-          # Apply additional WHERE filter from outer query
-          filtered = filter_rows(base_rows, where)
+      if MapSet.member?(visited_views, underlying_table) do
+        {:error, "Circular view reference detected: #{underlying_table}"}
+      else
+        # Add current view to visited set for cycle detection
+        new_visited = if view_name, do: MapSet.put(visited_views, normalize_name(view_name)), else: visited_views
 
-          # Apply ORDER BY from outer query (overrides underlying if present)
-          sorted = if order_by, do: sort_rows(filtered, order_by), else: filtered
+        # Execute the underlying query
+        underlying_columns = Map.get(query, :columns)
+        underlying_where = Map.get(query, :where)
+        underlying_order_by = Map.get(query, :order_by)
 
-          # Apply column projection from outer query
-          projected = project_view_columns(sorted, columns, mv_def)
+        case execute_select_with_cycle_detection(state, underlying_table, underlying_columns, underlying_where, underlying_order_by, new_visited) do
+          {:ok, base_rows} ->
+            # Apply additional WHERE filter from outer query
+            filtered = filter_rows(base_rows, where)
 
-          {:ok, projected}
+            # Apply ORDER BY from outer query (overrides underlying if present)
+            sorted = if order_by, do: sort_rows(filtered, order_by), else: filtered
 
-        error ->
-          error
+            # Apply column projection from outer query
+            projected = project_view_columns(sorted, columns, mv_def)
+
+            {:ok, projected}
+
+          error ->
+            error
+        end
       end
     else
       {:error, "Materialized view has no underlying query defined"}
+    end
+  end
+
+  # Helper function that performs select with cycle detection for views
+  defp execute_select_with_cycle_detection(state, table_name, columns, where, order_by, visited_views) do
+    # First check if it's a view
+    case Map.fetch(state.views, table_name) do
+      {:ok, view_def} ->
+        execute_view_select(state, view_def, columns, where, order_by, visited_views)
+
+      :error ->
+        # Check if it's a materialized view
+        case Map.fetch(state.materialized_views, table_name) do
+          {:ok, mv_def} ->
+            execute_materialized_view_select(state, mv_def, columns, where, order_by, visited_views)
+
+          :error ->
+            # Check if it's a table
+            case Map.fetch(state.data, table_name) do
+              {:ok, rows} ->
+                # Apply WHERE filter
+                filtered = filter_rows(rows, where)
+
+                # Apply ORDER BY
+                sorted = sort_rows(filtered, order_by)
+
+                # Project columns
+                projected = project_columns(sorted, columns)
+
+                {:ok, projected}
+
+              :error ->
+                {:error, "Table #{table_name} does not exist"}
+            end
+        end
     end
   end
 
@@ -1302,8 +1358,14 @@ defmodule OracleDb.Storage do
       Enum.map(rows, fn row ->
         row_keys = Map.keys(row) |> Enum.sort()
 
-        view_columns
-        |> Enum.zip(row_keys)
+        # Only zip up to the minimum length to avoid data loss
+        # If view_columns and row_keys have different lengths, use the shorter
+        pairs_count = min(length(view_columns), length(row_keys))
+        view_cols_subset = Enum.take(view_columns, pairs_count)
+        row_keys_subset = Enum.take(row_keys, pairs_count)
+
+        view_cols_subset
+        |> Enum.zip(row_keys_subset)
         |> Enum.reduce(%{}, fn {view_col, row_key}, acc ->
           Map.put(acc, view_col, Map.get(row, row_key))
         end)

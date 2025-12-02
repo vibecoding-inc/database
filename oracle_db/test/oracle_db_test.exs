@@ -725,6 +725,13 @@ defmodule OracleDbTest do
       assert hd(rows)["name"] == "Bob"
       assert List.last(rows)["name"] == "Charlie"
     end
+
+    test "SELECT from nested views", %{db: db} do
+      OracleDb.execute(db, "CREATE VIEW inner_view AS SELECT id, name FROM base_table")
+      OracleDb.execute(db, "CREATE VIEW outer_view AS SELECT id, name FROM inner_view")
+      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM outer_view")
+      assert length(rows) == 2
+    end
   end
 
   describe "Materialized Views" do

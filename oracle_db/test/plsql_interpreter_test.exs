@@ -17,7 +17,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
 
     test "executes block with variable assignment", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_name VARCHAR2(100) := 'Hello';
@@ -25,14 +25,14 @@ defmodule OracleDb.PlsqlInterpreterTest do
         DBMS_OUTPUT.PUT_LINE(v_name);
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["Hello"]}} = result
     end
 
     test "executes block with arithmetic", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_num NUMBER := 10;
@@ -42,14 +42,14 @@ defmodule OracleDb.PlsqlInterpreterTest do
         DBMS_OUTPUT.PUT_LINE(v_result);
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["15"]}} = result
     end
 
     test "executes block with string concatenation", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_first VARCHAR2(50) := 'Hello';
@@ -58,7 +58,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
         DBMS_OUTPUT.PUT_LINE(v_first || ' ' || v_last);
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["Hello World"]}} = result
     end
@@ -67,7 +67,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
   describe "execute/2 - control flow" do
     test "executes IF/THEN/ELSE", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_num NUMBER := 10;
@@ -79,14 +79,14 @@ defmodule OracleDb.PlsqlInterpreterTest do
         END IF;
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["Greater"]}} = result
     end
 
     test "executes FOR loop", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_total NUMBER := 0;
@@ -97,14 +97,14 @@ defmodule OracleDb.PlsqlInterpreterTest do
         DBMS_OUTPUT.PUT_LINE(v_total);
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["6"]}} = result
     end
 
     test "executes WHILE loop", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_counter NUMBER := 1;
@@ -117,7 +117,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
         DBMS_OUTPUT.PUT_LINE(v_total);
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["6"]}} = result
     end
@@ -126,7 +126,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
   describe "execute/2 - functions" do
     test "executes built-in UPPER function", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_result VARCHAR2(100);
@@ -135,14 +135,14 @@ defmodule OracleDb.PlsqlInterpreterTest do
         DBMS_OUTPUT.PUT_LINE(v_result);
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["HELLO"]}} = result
     end
 
     test "executes built-in LOWER function", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_result VARCHAR2(100);
@@ -151,14 +151,14 @@ defmodule OracleDb.PlsqlInterpreterTest do
         DBMS_OUTPUT.PUT_LINE(v_result);
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["hello"]}} = result
     end
 
     test "executes built-in LENGTH function", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_result NUMBER;
@@ -167,14 +167,14 @@ defmodule OracleDb.PlsqlInterpreterTest do
         DBMS_OUTPUT.PUT_LINE(v_result);
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["5"]}} = result
     end
 
     test "executes NVL function", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_null VARCHAR2(100);
@@ -184,7 +184,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
         DBMS_OUTPUT.PUT_LINE(v_result);
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["default"]}} = result
     end
@@ -193,20 +193,20 @@ defmodule OracleDb.PlsqlInterpreterTest do
   describe "execute/2 - RETURN statement" do
     test "executes RETURN with value", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       BEGIN
         RETURN 42;
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{return_value: 42}} = result
     end
 
     test "executes RETURN with expression", %{db: db} do
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_num NUMBER := 10;
@@ -214,7 +214,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
         RETURN v_num + 5;
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{return_value: 15}} = result
     end
@@ -233,7 +233,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
 
       {:ok, storage} = get_storage(db)
       result = PlsqlInterpreter.execute_procedure(storage, "SAY_HELLO", ["World"])
-      
+
       assert {:ok, %{output: output}} = result
       assert "Hello World" in output
     end
@@ -259,7 +259,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
 
       {:ok, storage} = get_storage(db)
       result = PlsqlInterpreter.execute_function(storage, "ADD_NUMBERS", [5, 3])
-      
+
       assert {:ok, 8} = result
     end
 
@@ -276,7 +276,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
 
       {:ok, storage} = get_storage(db)
       result = PlsqlInterpreter.execute_function(storage, "GET_GREETING", ["World"])
-      
+
       assert {:ok, "Hello World"} = result
     end
 
@@ -299,7 +299,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
       """)
 
       result = OracleDb.execute(db, "CALL greet_user('Alice')")
-      
+
       assert {:ok, %{message: message}} = result
       assert message =~ "GREET_USER"
     end
@@ -314,7 +314,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
       """)
 
       result = OracleDb.execute(db, "EXEC simple_proc")
-      
+
       assert {:ok, %{message: message}} = result
       assert message =~ "SIMPLE_PROC"
     end
@@ -322,24 +322,26 @@ defmodule OracleDb.PlsqlInterpreterTest do
 
   describe "anonymous block execution" do
     test "executes BEGIN/END block", %{db: db} do
-      result = OracleDb.execute(db, """
-        BEGIN
-          NULL;
-        END;
-      """)
-      
+      result =
+        OracleDb.execute(db, """
+          BEGIN
+            NULL;
+          END;
+        """)
+
       assert {:ok, %{message: "PL/SQL block executed"}} = result
     end
 
     test "executes DECLARE block", %{db: db} do
-      result = OracleDb.execute(db, """
-        DECLARE
-          v_test NUMBER := 1;
-        BEGIN
-          NULL;
-        END;
-      """)
-      
+      result =
+        OracleDb.execute(db, """
+          DECLARE
+            v_test NUMBER := 1;
+          BEGIN
+            NULL;
+          END;
+        """)
+
       assert {:ok, %{message: "PL/SQL block executed"}} = result
     end
   end
@@ -351,7 +353,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
       OracleDb.execute(db, "INSERT INTO test_select_into VALUES (1, 'Alice')")
 
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       DECLARE
         v_name VARCHAR2(100);
@@ -360,7 +362,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
         DBMS_OUTPUT.PUT_LINE(v_name);
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, %{output: ["Alice"]}} = result
     end
@@ -371,13 +373,13 @@ defmodule OracleDb.PlsqlInterpreterTest do
       OracleDb.execute(db, "CREATE TABLE test_dml (id NUMBER, name VARCHAR2(100))")
 
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       BEGIN
         INSERT INTO test_dml VALUES (1, 'Test');
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, _} = result
 
@@ -391,13 +393,13 @@ defmodule OracleDb.PlsqlInterpreterTest do
       OracleDb.execute(db, "INSERT INTO test_update VALUES (1, 'Original')")
 
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       BEGIN
         UPDATE test_update SET name = 'Updated' WHERE id = 1;
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, _} = result
 
@@ -412,13 +414,13 @@ defmodule OracleDb.PlsqlInterpreterTest do
       OracleDb.execute(db, "INSERT INTO test_delete VALUES (2)")
 
       {:ok, storage} = get_storage(db)
-      
+
       body = """
       BEGIN
         DELETE FROM test_delete WHERE id = 1;
       END;
       """
-      
+
       result = PlsqlInterpreter.execute(storage, body)
       assert {:ok, _} = result
 

@@ -19,12 +19,168 @@ defmodule OracleDb.SqlParser do
   """
   @spec parse(String.t()) :: parsed_statement()
   def parse(sql) when is_binary(sql) do
-    sql
-    |> String.trim()
-    |> String.trim_trailing(";")
-    |> String.trim()
-    |> tokenize()
-    |> parse_tokens()
+    trimmed_sql = sql |> String.trim()
+
+    # For PL/SQL blocks, validate syntax before parsing
+    case validate_plsql_syntax(trimmed_sql) do
+      {:error, _} = err ->
+        err
+
+      :ok ->
+        trimmed_sql
+        |> String.trim_trailing(";")
+        |> String.trim()
+        |> tokenize()
+        |> parse_tokens()
+    end
+  end
+
+  @doc """
+  Validates PL/SQL syntax to ensure blocks are properly terminated.
+  Returns :ok if valid, {:error, reason} if invalid.
+  """
+  @spec validate_plsql_syntax(String.t()) :: :ok | {:error, String.t()}
+  def validate_plsql_syntax(sql) do
+    sql_upper = String.upcase(sql)
+
+    cond do
+      # Check if this is a PL/SQL block that needs validation
+      is_plsql_statement?(sql_upper) ->
+        validate_plsql_block_structure(sql_upper)
+
+      # Not a PL/SQL block, no special validation needed
+      true ->
+        :ok
+    end
+  end
+
+  @doc """
+  Checks if the given SQL is a PL/SQL block that may contain multiple statements.
+
+  Returns true for:
+  - CREATE PROCEDURE / CREATE OR REPLACE PROCEDURE
+  - CREATE FUNCTION / CREATE OR REPLACE FUNCTION
+  - CREATE TRIGGER / CREATE OR REPLACE TRIGGER
+  - CREATE PACKAGE / CREATE OR REPLACE PACKAGE
+  - BEGIN (anonymous block)
+  - DECLARE (anonymous block with declarations)
+  """
+  @spec is_plsql_block?(String.t()) :: boolean()
+  def is_plsql_block?(sql) do
+    sql_upper = String.upcase(String.trim(sql))
+    is_plsql_statement?(sql_upper)
+  end
+
+  @doc """
+  Checks if a PL/SQL block is complete (properly terminated with END;).
+
+  A block is complete when:
+  - It ends with "END;" or "END <name>;"
+  - The BEGIN/END blocks are balanced
+  """
+  @spec plsql_block_complete?(String.t()) :: boolean()
+  def plsql_block_complete?(sql) do
+    sql_upper = String.upcase(sql)
+
+    # The block is complete when it ends with "END;" or "END <name>;"
+    # and the BEGIN/END blocks are balanced
+    ends_with_end_semicolon?(sql_upper) and begin_end_balanced?(sql_upper)
+  end
+
+  defp is_plsql_statement?(sql_upper) do
+    String.starts_with?(sql_upper, "CREATE PROCEDURE") or
+      String.starts_with?(sql_upper, "CREATE OR REPLACE PROCEDURE") or
+      String.starts_with?(sql_upper, "CREATE FUNCTION") or
+      String.starts_with?(sql_upper, "CREATE OR REPLACE FUNCTION") or
+      String.starts_with?(sql_upper, "CREATE TRIGGER") or
+      String.starts_with?(sql_upper, "CREATE OR REPLACE TRIGGER") or
+      String.starts_with?(sql_upper, "CREATE PACKAGE") or
+      String.starts_with?(sql_upper, "CREATE OR REPLACE PACKAGE") or
+      String.starts_with?(sql_upper, "BEGIN") or
+      String.starts_with?(sql_upper, "DECLARE")
+  end
+
+  defp ends_with_end_semicolon?(sql) do
+    # Match END; or END <identifier>;
+    Regex.match?(~r/END\s*;?\s*$/i, sql) or
+      Regex.match?(~r/END\s+\w+\s*;?\s*$/i, sql)
+  end
+
+  defp begin_end_balanced?(sql) do
+    # Remove string literals to avoid false matches
+    sql_without_strings = remove_string_literals(sql)
+
+    begin_count = length(Regex.scan(~r/\bBEGIN\b/i, sql_without_strings))
+
+    # Count END that are not followed by IF, LOOP, CASE (those are block terminators within PL/SQL)
+    # We want to count standalone END or END <procedure_name>
+    end_count = count_terminal_ends(sql_without_strings)
+
+    begin_count > 0 and end_count >= begin_count
+  end
+
+  defp remove_string_literals(sql) do
+    Regex.replace(~r/'[^']*'/, sql, "''")
+  end
+
+  defp validate_plsql_block_structure(sql) do
+    # Remove string literals to avoid false matches
+    sql_without_strings = remove_string_literals(sql)
+
+    # Check for required BEGIN keyword (for procedures, functions, triggers)
+    has_begin = Regex.match?(~r/\bBEGIN\b/, sql_without_strings)
+
+    # Check for proper termination
+    has_end =
+      Regex.match?(~r/\bEND\s*;?\s*$/, sql_without_strings) or
+        Regex.match?(~r/\bEND\s+\w+\s*;?\s*$/, sql_without_strings)
+
+    # Count BEGIN and END blocks
+    begin_count = length(Regex.scan(~r/\bBEGIN\b/, sql_without_strings))
+
+    # Count only terminal END statements (END; or END name;)
+    # Excluding END IF, END LOOP, END CASE which are internal block terminators
+    terminal_end_count = count_terminal_ends(sql_without_strings)
+
+    cond do
+      # Anonymous blocks must have BEGIN
+      (String.starts_with?(sql, "BEGIN") or String.starts_with?(sql, "DECLARE")) and not has_begin ->
+        {:error, "PL/SQL block must contain BEGIN"}
+
+      # Procedures/functions/triggers need IS/AS and BEGIN
+      is_stored_program?(sql) and not has_begin ->
+        {:error, "Stored program must contain BEGIN...END block"}
+
+      # Must have proper END termination
+      has_begin and not has_end ->
+        {:error, "PL/SQL block not properly terminated with END;"}
+
+      # BEGIN/END must be balanced
+      has_begin and terminal_end_count < begin_count ->
+        {:error, "Unbalanced BEGIN/END blocks - missing END;"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp is_stored_program?(sql) do
+    String.starts_with?(sql, "CREATE PROCEDURE") or
+      String.starts_with?(sql, "CREATE OR REPLACE PROCEDURE") or
+      String.starts_with?(sql, "CREATE FUNCTION") or
+      String.starts_with?(sql, "CREATE OR REPLACE FUNCTION") or
+      String.starts_with?(sql, "CREATE TRIGGER") or
+      String.starts_with?(sql, "CREATE OR REPLACE TRIGGER")
+  end
+
+  defp count_terminal_ends(sql) do
+    # Count END; (terminal END with optional semicolon)
+    end_semicolon = length(Regex.scan(~r/\bEND\s*;/, sql))
+
+    # Count END <name>; where name is not IF, LOOP, or CASE
+    end_name = length(Regex.scan(~r/\bEND\s+(?!IF\b|LOOP\b|CASE\b)\w+\s*;/, sql))
+
+    end_semicolon + end_name
   end
 
   @doc """

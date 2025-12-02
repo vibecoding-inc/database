@@ -187,19 +187,43 @@ defmodule OracleDb.Repl do
   end
 
   defp collect_multiline_sql(sql) do
-    if String.ends_with?(String.trim(sql), ";") or sql == "" do
-      sql
-    else
-      case IO.gets("     > ") do
-        :eof ->
-          sql
+    trimmed = String.trim(sql)
 
-        {:error, _} ->
-          sql
+    cond do
+      sql == "" ->
+        sql
 
-        more when is_binary(more) ->
-          collect_multiline_sql(sql <> "\n" <> String.trim(more))
-      end
+      # Check if we're in a PL/SQL block that needs to continue until END;
+      OracleDb.SqlParser.is_plsql_block?(trimmed) and
+          not OracleDb.SqlParser.plsql_block_complete?(trimmed) ->
+        # Continue collecting input until the PL/SQL block is complete
+        case IO.gets("     > ") do
+          :eof ->
+            sql
+
+          {:error, _} ->
+            sql
+
+          more when is_binary(more) ->
+            collect_multiline_sql(sql <> "\n" <> String.trim(more))
+        end
+
+      # Regular SQL - stop at first semicolon
+      String.ends_with?(trimmed, ";") ->
+        sql
+
+      # No semicolon yet, continue collecting
+      true ->
+        case IO.gets("     > ") do
+          :eof ->
+            sql
+
+          {:error, _} ->
+            sql
+
+          more when is_binary(more) ->
+            collect_multiline_sql(sql <> "\n" <> String.trim(more))
+        end
     end
   end
 

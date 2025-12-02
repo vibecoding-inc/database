@@ -125,8 +125,9 @@ defmodule OracleDb.Repl do
         IO.puts("Columns:")
 
         Enum.each(schema.columns, fn {name, type, modifiers} ->
+          type_str = format_type_with_size(type, modifiers)
           mods = format_modifiers(modifiers)
-          IO.puts("  #{name} #{format_type(type)}#{mods}")
+          IO.puts("  #{name} #{type_str}#{mods}")
         end)
 
         if length(schema.constraints) > 0 do
@@ -279,22 +280,42 @@ defmodule OracleDb.Repl do
   defp format_value(value), do: inspect(value)
 
   defp format_type(type) when is_atom(type), do: Atom.to_string(type) |> String.upcase()
-  defp format_type({type, size}), do: "#{format_type(type)}(#{size})"
+  defp format_type({type, size}) when is_integer(size), do: "#{format_type(type)}(#{size})"
+  defp format_type({type, size}) when is_binary(size), do: "#{format_type(type)}(#{size})"
   defp format_type({type, precision, scale}), do: "#{format_type(type)}(#{precision}, #{scale})"
   defp format_type(type), do: inspect(type)
+
+  defp format_type_with_size(type, modifiers) do
+    base_type = format_type(type)
+
+    case Keyword.get(modifiers, :size) do
+      nil -> base_type
+      size -> "#{base_type}(#{size})"
+    end
+  end
 
   defp format_modifiers([]), do: ""
 
   defp format_modifiers(modifiers) do
     mods =
-      Enum.map(modifiers, fn
+      modifiers
+      |> Enum.reject(fn
+        {:size, _} -> true
+        _ -> false
+      end)
+      |> Enum.map(fn
         :primary_key -> "PRIMARY KEY"
         :not_null -> "NOT NULL"
+        :null -> nil
         {:default, val} -> "DEFAULT #{inspect(val)}"
         other -> inspect(other)
       end)
+      |> Enum.reject(&is_nil/1)
 
-    " " <> Enum.join(mods, " ")
+    case mods do
+      [] -> ""
+      _ -> " " <> Enum.join(mods, " ")
+    end
   end
 
   defp print_help do

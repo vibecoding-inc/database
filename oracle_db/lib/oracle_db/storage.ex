@@ -1190,22 +1190,131 @@ defmodule OracleDb.Storage do
   end
 
   defp execute_select(state, table_name, columns, where, order_by) do
-    case Map.fetch(state.data, table_name) do
-      {:ok, rows} ->
-        # Apply WHERE filter
-        filtered = filter_rows(rows, where)
-
-        # Apply ORDER BY
-        sorted = sort_rows(filtered, order_by)
-
-        # Project columns
-        projected = project_columns(sorted, columns)
-
-        {:ok, projected}
+    # First check if it's a view
+    case Map.fetch(state.views, table_name) do
+      {:ok, view_def} ->
+        execute_view_select(state, view_def, columns, where, order_by)
 
       :error ->
-        {:error, "Table #{table_name} does not exist"}
+        # Check if it's a materialized view
+        case Map.fetch(state.materialized_views, table_name) do
+          {:ok, mv_def} ->
+            execute_materialized_view_select(state, mv_def, columns, where, order_by)
+
+          :error ->
+            # Check if it's a table
+            case Map.fetch(state.data, table_name) do
+              {:ok, rows} ->
+                # Apply WHERE filter
+                filtered = filter_rows(rows, where)
+
+                # Apply ORDER BY
+                sorted = sort_rows(filtered, order_by)
+
+                # Project columns
+                projected = project_columns(sorted, columns)
+
+                {:ok, projected}
+
+              :error ->
+                {:error, "Table #{table_name} does not exist"}
+            end
+        end
     end
+  end
+
+  # Execute SELECT on a view by running the underlying query
+  defp execute_view_select(state, view_def, columns, where, order_by) do
+    # Get the view's underlying query
+    query = Map.get(view_def, :query)
+
+    if query do
+      # Execute the underlying query
+      # Normalize the table name to uppercase to match how tables are stored
+      underlying_table = normalize_name(Map.get(query, :table))
+      underlying_columns = Map.get(query, :columns)
+      underlying_where = Map.get(query, :where)
+      underlying_order_by = Map.get(query, :order_by)
+
+      case execute_select(state, underlying_table, underlying_columns, underlying_where, underlying_order_by) do
+        {:ok, base_rows} ->
+          # Apply additional WHERE filter from outer query
+          filtered = filter_rows(base_rows, where)
+
+          # Apply ORDER BY from outer query (overrides underlying if present)
+          sorted = if order_by, do: sort_rows(filtered, order_by), else: filtered
+
+          # Apply column projection from outer query
+          # If columns is [{:all, "*"}], return all columns from the view
+          projected = project_view_columns(sorted, columns, view_def)
+
+          {:ok, projected}
+
+        error ->
+          error
+      end
+    else
+      {:error, "View has no underlying query defined"}
+    end
+  end
+
+  # Execute SELECT on a materialized view
+  defp execute_materialized_view_select(state, mv_def, columns, where, order_by) do
+    # Get the materialized view's underlying query
+    query = Map.get(mv_def, :query)
+
+    if query do
+      # Execute the underlying query (in a real implementation, this would use cached data)
+      # Normalize the table name to uppercase to match how tables are stored
+      underlying_table = normalize_name(Map.get(query, :table))
+      underlying_columns = Map.get(query, :columns)
+      underlying_where = Map.get(query, :where)
+      underlying_order_by = Map.get(query, :order_by)
+
+      case execute_select(state, underlying_table, underlying_columns, underlying_where, underlying_order_by) do
+        {:ok, base_rows} ->
+          # Apply additional WHERE filter from outer query
+          filtered = filter_rows(base_rows, where)
+
+          # Apply ORDER BY from outer query (overrides underlying if present)
+          sorted = if order_by, do: sort_rows(filtered, order_by), else: filtered
+
+          # Apply column projection from outer query
+          projected = project_view_columns(sorted, columns, mv_def)
+
+          {:ok, projected}
+
+        error ->
+          error
+      end
+    else
+      {:error, "Materialized view has no underlying query defined"}
+    end
+  end
+
+  # Project columns for view output, handling view column aliases
+  defp project_view_columns(rows, [{:all, "*"}], view_def) do
+    # Get column list from view definition if available
+    view_columns = Map.get(view_def, :columns, [])
+
+    if view_columns != [] do
+      # Rename columns according to view column list
+      Enum.map(rows, fn row ->
+        row_keys = Map.keys(row) |> Enum.sort()
+
+        view_columns
+        |> Enum.zip(row_keys)
+        |> Enum.reduce(%{}, fn {view_col, row_key}, acc ->
+          Map.put(acc, view_col, Map.get(row, row_key))
+        end)
+      end)
+    else
+      rows
+    end
+  end
+
+  defp project_view_columns(rows, columns, _view_def) do
+    project_columns(rows, columns)
   end
 
   defp filter_rows(rows, nil), do: rows

@@ -25,7 +25,14 @@ defmodule OracleDb.QueryExecutor do
   """
   @spec execute_parsed(GenServer.server(), SqlParser.parsed_statement()) :: result()
   def execute_parsed(storage, {:select, info}) do
-    Storage.select(storage, info.table, info.columns, info.where, info.order_by)
+    joins = Map.get(info, :joins, [])
+    table_info = Map.get(info, :table_info, {info.table, nil})
+
+    if joins == [] do
+      Storage.select(storage, info.table, info.columns, info.where, info.order_by)
+    else
+      Storage.select_with_joins(storage, table_info, joins, info.columns, info.where, info.order_by)
+    end
   end
 
   def execute_parsed(storage, {:insert, info}) do

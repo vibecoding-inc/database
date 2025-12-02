@@ -258,8 +258,15 @@ defmodule OracleDb.SqlParser do
     # Parse columns
     {columns, rest} = parse_columns(tokens)
 
-    # Parse FROM clause
-    {table, rest} = parse_from(rest)
+    # Parse FROM clause with potential JOINs
+    {{table_info, joins}, rest} = parse_from(rest)
+
+    # Extract table name for backward compatibility
+    table =
+      case table_info do
+        {name, _alias} -> name
+        name -> name
+      end
 
     # Parse WHERE clause (optional)
     {where, rest} = parse_where(rest)
@@ -274,6 +281,8 @@ defmodule OracleDb.SqlParser do
      %{
        columns: columns,
        table: table,
+       table_info: table_info,
+       joins: joins,
        where: where,
        order_by: order_by,
        rownum: rownum
@@ -446,17 +455,282 @@ defmodule OracleDb.SqlParser do
     case find_keyword(tokens, "FROM") do
       nil ->
         # Check for DUAL (Oracle allows SELECT without FROM when using DUAL implicitly)
-        {nil, tokens}
+        {{nil, []}, tokens}
 
       {_before, rest} ->
         case rest do
           [table | remaining] ->
-            {normalize_token(table), remaining}
+            # Check for table alias
+            {table_with_alias, remaining2} = parse_table_with_alias([table | remaining])
+            # Parse any JOIN clauses
+            {joins, final_rest} = parse_joins(remaining2)
+            {{table_with_alias, joins}, final_rest}
 
           [] ->
-            {nil, []}
+            {{nil, []}, []}
         end
     end
+  end
+
+  defp parse_table_with_alias([table | rest]) do
+    case rest do
+      [alias_candidate | remaining] when is_binary(alias_candidate) ->
+        upcase = String.upcase(alias_candidate)
+
+        cond do
+          upcase in ["WHERE", "ORDER", "GROUP", "HAVING", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "NATURAL", "JOIN", "ON", "USING", ","] ->
+            {{normalize_token(table), nil}, rest}
+
+          upcase == "AS" ->
+            case remaining do
+              [actual_alias | rest2] ->
+                {{normalize_token(table), normalize_token(actual_alias)}, rest2}
+
+              [] ->
+                {{normalize_token(table), nil}, rest}
+            end
+
+          true ->
+            # Could be implicit alias
+            {{normalize_token(table), normalize_token(alias_candidate)}, remaining}
+        end
+
+      _ ->
+        {{normalize_token(table), nil}, rest}
+    end
+  end
+
+  defp parse_table_with_alias([]), do: {{nil, nil}, []}
+
+  defp parse_joins(tokens) do
+    parse_joins(tokens, [])
+  end
+
+  defp parse_joins([], acc), do: {Enum.reverse(acc), []}
+
+  defp parse_joins([token | _] = tokens, acc) when is_binary(token) do
+    upcase = String.upcase(token)
+
+    cond do
+      upcase in ["WHERE", "ORDER", "GROUP", "HAVING"] ->
+        {Enum.reverse(acc), tokens}
+
+      upcase == "INNER" ->
+        parse_join_clause(tokens, :inner, acc)
+
+      upcase == "LEFT" ->
+        parse_outer_join_clause(tokens, :left, acc)
+
+      upcase == "RIGHT" ->
+        parse_outer_join_clause(tokens, :right, acc)
+
+      upcase == "FULL" ->
+        parse_outer_join_clause(tokens, :full, acc)
+
+      upcase == "CROSS" ->
+        parse_cross_join_clause(tokens, acc)
+
+      upcase == "NATURAL" ->
+        parse_natural_join_clause(tokens, acc)
+
+      upcase == "JOIN" ->
+        # Simple JOIN without qualifier (treated as INNER JOIN)
+        parse_join_clause(["INNER" | tokens], :inner, acc)
+
+      upcase == "," ->
+        # Comma-separated tables (implicit cross join / cartesian product)
+        parse_comma_join(tl(tokens), acc)
+
+      true ->
+        {Enum.reverse(acc), tokens}
+    end
+  end
+
+  defp parse_joins(tokens, acc), do: {Enum.reverse(acc), tokens}
+
+  defp parse_join_clause(tokens, join_type, acc) do
+    # Skip "INNER" and "JOIN" keywords
+    rest =
+      case tokens do
+        ["INNER", "JOIN" | r] -> r
+        [_ | ["JOIN" | r]] -> r
+        ["JOIN" | r] -> r
+        _ -> tokens
+      end
+
+    rest =
+      case rest do
+        [t | r] when is_binary(t) ->
+          if String.upcase(t) == "JOIN", do: r, else: rest
+
+        _ ->
+          rest
+      end
+
+    {table_with_alias, remaining} = parse_table_with_alias(rest)
+    {join_condition, final_rest} = parse_join_condition(remaining)
+
+    join = %{
+      type: join_type,
+      table: table_with_alias,
+      condition: join_condition
+    }
+
+    parse_joins(final_rest, [join | acc])
+  end
+
+  defp parse_outer_join_clause(tokens, direction, acc) do
+    # Skip "LEFT/RIGHT/FULL" "OUTER" (optional) "JOIN" keywords
+    rest =
+      case tokens do
+        [_, "OUTER", "JOIN" | r] -> r
+        [_, "JOIN" | r] -> r
+        [_ | r] -> r
+      end
+
+    {table_with_alias, remaining} = parse_table_with_alias(rest)
+    {join_condition, final_rest} = parse_join_condition(remaining)
+
+    join = %{
+      type: {:outer, direction},
+      table: table_with_alias,
+      condition: join_condition
+    }
+
+    parse_joins(final_rest, [join | acc])
+  end
+
+  defp parse_cross_join_clause(tokens, acc) do
+    # Skip "CROSS" "JOIN" keywords
+    rest =
+      case tokens do
+        ["CROSS", "JOIN" | r] -> r
+        [_ | r] -> r
+      end
+
+    {table_with_alias, remaining} = parse_table_with_alias(rest)
+
+    join = %{
+      type: :cross,
+      table: table_with_alias,
+      condition: nil
+    }
+
+    parse_joins(remaining, [join | acc])
+  end
+
+  defp parse_natural_join_clause(tokens, acc) do
+    # Skip "NATURAL" and then determine join type
+    rest = tl(tokens)
+
+    {join_type, rest2} =
+      case rest do
+        ["LEFT", "OUTER", "JOIN" | r] -> {{:outer, :left}, r}
+        ["LEFT", "JOIN" | r] -> {{:outer, :left}, r}
+        ["RIGHT", "OUTER", "JOIN" | r] -> {{:outer, :right}, r}
+        ["RIGHT", "JOIN" | r] -> {{:outer, :right}, r}
+        ["FULL", "OUTER", "JOIN" | r] -> {{:outer, :full}, r}
+        ["FULL", "JOIN" | r] -> {{:outer, :full}, r}
+        ["INNER", "JOIN" | r] -> {:natural, r}
+        ["JOIN" | r] -> {:natural, r}
+        _ -> {:natural, rest}
+      end
+
+    {table_with_alias, remaining} = parse_table_with_alias(rest2)
+
+    join = %{
+      type: join_type,
+      table: table_with_alias,
+      condition: {:natural, nil}
+    }
+
+    parse_joins(remaining, [join | acc])
+  end
+
+  defp parse_comma_join(tokens, acc) do
+    {table_with_alias, remaining} = parse_table_with_alias(tokens)
+
+    join = %{
+      type: :cross,
+      table: table_with_alias,
+      condition: nil
+    }
+
+    parse_joins(remaining, [join | acc])
+  end
+
+  defp parse_join_condition(tokens) do
+    case tokens do
+      ["ON" | rest] ->
+        {condition, remaining} = parse_join_on_condition(rest)
+        {{:on, condition}, remaining}
+
+      ["USING", "(" | rest] ->
+        {columns, remaining} = parse_using_columns(rest)
+        {{:using, columns}, remaining}
+
+      _ ->
+        {nil, tokens}
+    end
+  end
+
+  defp parse_join_on_condition(tokens) do
+    # Parse condition until we hit another JOIN keyword or WHERE/ORDER/GROUP/HAVING
+    parse_join_on_tokens(tokens, [])
+  end
+
+  defp parse_join_on_tokens([], acc) do
+    {build_condition_tree(Enum.reverse(acc)), []}
+  end
+
+  defp parse_join_on_tokens([token | rest], acc) when is_binary(token) do
+    upcase = String.upcase(token)
+
+    cond do
+      upcase in ["INNER", "LEFT", "RIGHT", "FULL", "CROSS", "NATURAL", "JOIN", "WHERE", "ORDER", "GROUP", "HAVING"] ->
+        {build_condition_tree(Enum.reverse(acc)), [token | rest]}
+
+      upcase == "AND" ->
+        parse_join_on_tokens(rest, [:and | acc])
+
+      upcase == "OR" ->
+        parse_join_on_tokens(rest, [:or | acc])
+
+      upcase == "(" ->
+        {nested, remaining} = parse_nested_conditions(rest)
+        parse_join_on_tokens(remaining, [{:nested, nested} | acc])
+
+      upcase in ["=", "<>", "!=", ">", "<", ">=", "<="] ->
+        {comp, remaining} = parse_comparison(rest, acc, upcase)
+        parse_join_on_tokens(remaining, comp)
+
+      true ->
+        parse_join_on_tokens(rest, [token | acc])
+    end
+  end
+
+  defp parse_join_on_tokens([token | rest], acc) do
+    parse_join_on_tokens(rest, [token | acc])
+  end
+
+  defp parse_using_columns(tokens) do
+    parse_using_columns(tokens, [])
+  end
+
+  defp parse_using_columns([")" | rest], acc) do
+    {Enum.reverse(acc), rest}
+  end
+
+  defp parse_using_columns(["," | rest], acc) do
+    parse_using_columns(rest, acc)
+  end
+
+  defp parse_using_columns([col | rest], acc) when is_binary(col) do
+    parse_using_columns(rest, [String.upcase(col) | acc])
+  end
+
+  defp parse_using_columns([], acc) do
+    {Enum.reverse(acc), []}
   end
 
   defp parse_where(tokens) do

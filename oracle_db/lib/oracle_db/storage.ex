@@ -87,6 +87,15 @@ defmodule OracleDb.Storage do
   end
 
   @doc """
+  Selects rows with JOIN operations.
+  """
+  @spec select_with_joins(GenServer.server(), {table_name() | nil, String.t() | nil}, list(), list(), any(), any()) ::
+          {:ok, [row()]} | {:error, String.t()}
+  def select_with_joins(server \\ __MODULE__, table_info, joins, columns, where, order_by) do
+    GenServer.call(server, {:select_with_joins, table_info, joins, columns, where, order_by})
+  end
+
+  @doc """
   Updates rows in a table.
   """
   @spec update(GenServer.server(), table_name(), [{column_name(), any()}], any()) ::
@@ -567,6 +576,12 @@ defmodule OracleDb.Storage do
   @impl true
   def handle_call({:select, table_name, columns, where, order_by}, _from, state) do
     result = execute_select(state, table_name, columns, where, order_by)
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:select_with_joins, table_info, joins, columns, where, order_by}, _from, state) do
+    result = execute_select_with_joins(state, table_info, joins, columns, where, order_by)
     {:reply, result, state}
   end
 
@@ -1265,6 +1280,315 @@ defmodule OracleDb.Storage do
         end
     end
   end
+
+  # Execute SELECT with JOIN operations
+  defp execute_select_with_joins(state, {table_name, table_alias}, joins, columns, where, order_by) do
+    normalized_table = if table_name, do: normalize_name(table_name), else: nil
+
+    # Get rows from the first (left) table
+    case get_table_rows(state, normalized_table) do
+      {:ok, left_rows} ->
+        # Add table alias prefix to columns if alias is specified
+        left_rows = prefix_rows(left_rows, table_alias || normalized_table)
+
+        # Process each join
+        case process_joins(state, left_rows, joins, table_alias || normalized_table) do
+          {:ok, joined_rows} ->
+            # Apply WHERE filter
+            filtered = filter_rows(joined_rows, where)
+
+            # Apply ORDER BY
+            sorted = sort_rows(filtered, order_by)
+
+            # Project columns
+            projected = project_columns(sorted, columns)
+
+            {:ok, projected}
+
+          {:error, _} = error ->
+            error
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # Get rows from a table by name
+  defp get_table_rows(_state, nil), do: {:ok, [%{}]}
+  defp get_table_rows(_state, "DUAL"), do: {:ok, [%{}]}
+
+  defp get_table_rows(state, table_name) do
+    # First check if it's a view
+    case Map.fetch(state.views, table_name) do
+      {:ok, _view_def} ->
+        # Execute view query
+        execute_select(state, table_name, [{:all, "*"}], nil, nil)
+
+      :error ->
+        # Check if it's a materialized view
+        case Map.fetch(state.materialized_views, table_name) do
+          {:ok, _mv_def} ->
+            execute_select(state, table_name, [{:all, "*"}], nil, nil)
+
+          :error ->
+            # Check if it's a table
+            case Map.fetch(state.data, table_name) do
+              {:ok, rows} -> {:ok, rows}
+              :error -> {:error, "Table #{table_name} does not exist"}
+            end
+        end
+    end
+  end
+
+  # Prefix row columns with table alias/name
+  defp prefix_rows(rows, nil), do: rows
+
+  defp prefix_rows(rows, prefix) do
+    Enum.map(rows, fn row ->
+      row
+      |> Enum.map(fn {k, v} ->
+        # Keep both prefixed and non-prefixed keys for flexibility
+        key = to_string(k)
+
+        if String.starts_with?(key, "__") do
+          # Don't prefix internal keys like __ROWNUM__
+          {key, v}
+        else
+          {key, v}
+        end
+      end)
+      |> Enum.into(%{})
+      |> Map.merge(
+        row
+        |> Enum.reject(fn {k, _} -> String.starts_with?(to_string(k), "__") end)
+        |> Enum.map(fn {k, v} -> {"#{prefix}.#{k}", v} end)
+        |> Enum.into(%{})
+      )
+    end)
+  end
+
+  # Process all joins sequentially
+  defp process_joins(_state, rows, [], _left_alias), do: {:ok, rows}
+
+  defp process_joins(state, left_rows, [join | rest], left_alias) do
+    %{type: join_type, table: {join_table, join_alias}, condition: condition} = join
+    normalized_join_table = if join_table, do: normalize_name(join_table), else: nil
+    right_alias = join_alias || normalized_join_table
+
+    case get_table_rows(state, normalized_join_table) do
+      {:ok, right_rows} ->
+        right_rows = prefix_rows(right_rows, right_alias)
+
+        joined =
+          case join_type do
+            :inner ->
+              execute_inner_join(left_rows, right_rows, condition, left_alias, right_alias)
+
+            {:outer, :left} ->
+              execute_left_join(left_rows, right_rows, condition, left_alias, right_alias)
+
+            {:outer, :right} ->
+              execute_right_join(left_rows, right_rows, condition, left_alias, right_alias)
+
+            {:outer, :full} ->
+              execute_full_join(left_rows, right_rows, condition, left_alias, right_alias)
+
+            :cross ->
+              execute_cross_join(left_rows, right_rows)
+
+            :natural ->
+              execute_natural_join(left_rows, right_rows, :inner)
+          end
+
+        process_joins(state, joined, rest, left_alias)
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # Inner join: only matching rows from both tables
+  defp execute_inner_join(left_rows, right_rows, condition, left_alias, right_alias) do
+    for left_row <- left_rows,
+        right_row <- right_rows,
+        evaluate_join_condition(left_row, right_row, condition, left_alias, right_alias),
+        do: Map.merge(left_row, right_row)
+  end
+
+  # Left join: all rows from left, matching from right (nulls if no match)
+  defp execute_left_join(left_rows, right_rows, condition, left_alias, right_alias) do
+    Enum.flat_map(left_rows, fn left_row ->
+      matches =
+        Enum.filter(right_rows, fn right_row ->
+          evaluate_join_condition(left_row, right_row, condition, left_alias, right_alias)
+        end)
+
+      if matches == [] do
+        # No match - include left row with null values for right columns
+        right_keys = if right_rows != [], do: Map.keys(hd(right_rows)), else: []
+        null_right = Enum.map(right_keys, fn k -> {k, nil} end) |> Enum.into(%{})
+        [Map.merge(left_row, null_right)]
+      else
+        Enum.map(matches, fn right_row -> Map.merge(left_row, right_row) end)
+      end
+    end)
+  end
+
+  # Right join: all rows from right, matching from left (nulls if no match)
+  defp execute_right_join(left_rows, right_rows, condition, left_alias, right_alias) do
+    Enum.flat_map(right_rows, fn right_row ->
+      matches =
+        Enum.filter(left_rows, fn left_row ->
+          evaluate_join_condition(left_row, right_row, condition, left_alias, right_alias)
+        end)
+
+      if matches == [] do
+        # No match - include right row with null values for left columns
+        left_keys = if left_rows != [], do: Map.keys(hd(left_rows)), else: []
+        null_left = Enum.map(left_keys, fn k -> {k, nil} end) |> Enum.into(%{})
+        [Map.merge(null_left, right_row)]
+      else
+        Enum.map(matches, fn left_row -> Map.merge(left_row, right_row) end)
+      end
+    end)
+  end
+
+  # Full outer join: all rows from both tables
+  defp execute_full_join(left_rows, right_rows, condition, left_alias, right_alias) do
+    # Get left join results
+    left_join_results = execute_left_join(left_rows, right_rows, condition, left_alias, right_alias)
+
+    # Find right rows that didn't match any left row
+    right_only =
+      Enum.filter(right_rows, fn right_row ->
+        not Enum.any?(left_rows, fn left_row ->
+          evaluate_join_condition(left_row, right_row, condition, left_alias, right_alias)
+        end)
+      end)
+
+    # Add unmatched right rows with null left columns
+    left_keys = if left_rows != [], do: Map.keys(hd(left_rows)), else: []
+    null_left = Enum.map(left_keys, fn k -> {k, nil} end) |> Enum.into(%{})
+
+    right_only_with_nulls = Enum.map(right_only, fn right_row -> Map.merge(null_left, right_row) end)
+
+    left_join_results ++ right_only_with_nulls
+  end
+
+  # Cross join: cartesian product
+  defp execute_cross_join(left_rows, right_rows) do
+    for left_row <- left_rows,
+        right_row <- right_rows,
+        do: Map.merge(left_row, right_row)
+  end
+
+  # Natural join: join on all columns with the same name
+  defp execute_natural_join(left_rows, right_rows, _join_type) do
+    if left_rows == [] or right_rows == [] do
+      []
+    else
+      # Find common column names (excluding prefixed columns)
+      left_keys = Map.keys(hd(left_rows)) |> Enum.map(&to_string/1) |> Enum.reject(&String.contains?(&1, ".")) |> Enum.reject(&String.starts_with?(&1, "__"))
+      right_keys = Map.keys(hd(right_rows)) |> Enum.map(&to_string/1) |> Enum.reject(&String.contains?(&1, ".")) |> Enum.reject(&String.starts_with?(&1, "__"))
+      common_cols = MapSet.intersection(MapSet.new(left_keys), MapSet.new(right_keys)) |> MapSet.to_list()
+
+      if common_cols == [] do
+        # No common columns - do cross join
+        execute_cross_join(left_rows, right_rows)
+      else
+        # Join on common columns
+        for left_row <- left_rows,
+            right_row <- right_rows,
+            natural_join_matches?(left_row, right_row, common_cols),
+            do: Map.merge(left_row, right_row)
+      end
+    end
+  end
+
+  defp natural_join_matches?(left_row, right_row, common_cols) do
+    Enum.all?(common_cols, fn col ->
+      left_val = get_column_value(left_row, col)
+      right_val = get_column_value(right_row, col)
+      normalize_compare(left_val) == normalize_compare(right_val)
+    end)
+  end
+
+  # Evaluate join condition
+  defp evaluate_join_condition(_left, _right, nil, _left_alias, _right_alias), do: true
+  defp evaluate_join_condition(_left, _right, {:natural, _}, _left_alias, _right_alias), do: true
+
+  defp evaluate_join_condition(left, right, {:on, condition}, left_alias, right_alias) do
+    merged = Map.merge(left, right)
+    evaluate_join_on(merged, condition, left_alias, right_alias)
+  end
+
+  defp evaluate_join_condition(left, right, {:using, columns}, _left_alias, _right_alias) do
+    Enum.all?(columns, fn col ->
+      left_val = get_column_value(left, col)
+      right_val = get_column_value(right, col)
+      normalize_compare(left_val) == normalize_compare(right_val)
+    end)
+  end
+
+  # Evaluate ON condition for joins
+  defp evaluate_join_on(row, {:and, left, right}, left_alias, right_alias) do
+    evaluate_join_on(row, left, left_alias, right_alias) and
+      evaluate_join_on(row, right, left_alias, right_alias)
+  end
+
+  defp evaluate_join_on(row, {:or, left, right}, left_alias, right_alias) do
+    evaluate_join_on(row, left, left_alias, right_alias) or
+      evaluate_join_on(row, right, left_alias, right_alias)
+  end
+
+  defp evaluate_join_on(row, {:comparison, col1, op, col2}, _left_alias, _right_alias) do
+    # Both sides could be column references
+    val1 = resolve_join_column(row, col1)
+    val2 = resolve_join_column(row, col2)
+    compare(val1, op, val2)
+  end
+
+  defp evaluate_join_on(row, {:nested, condition}, left_alias, right_alias) do
+    evaluate_join_on(row, condition, left_alias, right_alias)
+  end
+
+  defp evaluate_join_on(row, condition, _left_alias, _right_alias) do
+    # Fall back to regular condition evaluation
+    evaluate_condition(row, condition)
+  end
+
+  # Resolve column value in join context (might be table.column format)
+  defp resolve_join_column(row, col) when is_binary(col) do
+    # Try exact match first
+    case Map.fetch(row, col) do
+      {:ok, val} ->
+        val
+
+      :error ->
+        # Try case-insensitive match
+        upcase_col = String.upcase(col)
+
+        result =
+          Enum.find_value(row, fn {k, v} ->
+            if String.upcase(to_string(k)) == upcase_col, do: v
+          end)
+
+        # If still not found, it might be a literal value
+        if result == nil and not String.contains?(col, ".") do
+          # Check if it looks like a number
+          cond do
+            String.match?(col, ~r/^\d+$/) -> String.to_integer(col)
+            String.match?(col, ~r/^\d+\.\d+$/) -> String.to_float(col)
+            true -> col
+          end
+        else
+          result
+        end
+    end
+  end
+
+  defp resolve_join_column(_row, val), do: val
 
   # Execute SELECT on a view by running the underlying query
   # Uses visited_views set to prevent circular references causing infinite recursion

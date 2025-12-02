@@ -1099,4 +1099,219 @@ defmodule OracleDb.SqlParserTest do
       assert {:anonymous_block, _} = SqlParser.parse(sql)
     end
   end
+
+  describe "JOIN parsing" do
+    test "parses simple INNER JOIN with ON" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users INNER JOIN orders ON users.id = orders.user_id")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == :inner
+      assert elem(join.table, 0) == "orders"
+      assert {:on, _} = join.condition
+    end
+
+    test "parses simple JOIN without INNER keyword" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users JOIN orders ON users.id = orders.user_id")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == :inner
+    end
+
+    test "parses LEFT JOIN" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == {:outer, :left}
+    end
+
+    test "parses LEFT OUTER JOIN" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users LEFT OUTER JOIN orders ON users.id = orders.user_id")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == {:outer, :left}
+    end
+
+    test "parses RIGHT JOIN" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users RIGHT JOIN orders ON users.id = orders.user_id")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == {:outer, :right}
+    end
+
+    test "parses RIGHT OUTER JOIN" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users RIGHT OUTER JOIN orders ON users.id = orders.user_id")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == {:outer, :right}
+    end
+
+    test "parses FULL JOIN" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users FULL JOIN orders ON users.id = orders.user_id")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == {:outer, :full}
+    end
+
+    test "parses FULL OUTER JOIN" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users FULL OUTER JOIN orders ON users.id = orders.user_id")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == {:outer, :full}
+    end
+
+    test "parses CROSS JOIN" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users CROSS JOIN orders")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == :cross
+      assert join.condition == nil
+    end
+
+    test "parses NATURAL JOIN" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users NATURAL JOIN orders")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == :natural
+      assert {:natural, nil} = join.condition
+    end
+
+    test "parses JOIN with USING clause" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users JOIN orders USING (user_id)")
+
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert {:using, ["USER_ID"]} = join.condition
+    end
+
+    test "parses JOIN with USING clause with multiple columns" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users JOIN orders USING (user_id, date)")
+
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert {:using, columns} = join.condition
+      assert "USER_ID" in columns
+      assert "DATE" in columns
+    end
+
+    test "parses multiple JOINs" do
+      {:select, result} =
+        SqlParser.parse("""
+          SELECT *
+          FROM users
+          INNER JOIN orders ON users.id = orders.user_id
+          LEFT JOIN products ON orders.product_id = products.id
+        """)
+
+      assert result.table == "users"
+      assert length(result.joins) == 2
+
+      [join1, join2] = result.joins
+      assert join1.type == :inner
+      assert elem(join1.table, 0) == "orders"
+
+      assert join2.type == {:outer, :left}
+      assert elem(join2.table, 0) == "products"
+    end
+
+    test "parses JOIN with table alias" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users u JOIN orders o ON u.id = o.user_id")
+
+      assert result.table == "users"
+      assert result.table_info == {"users", "u"}
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.table == {"orders", "o"}
+    end
+
+    test "parses JOIN with AS table alias" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users AS u JOIN orders AS o ON u.id = o.user_id")
+
+      assert result.table_info == {"users", "u"}
+      [join] = result.joins
+      assert join.table == {"orders", "o"}
+    end
+
+    test "parses JOIN with WHERE clause" do
+      {:select, result} =
+        SqlParser.parse("""
+          SELECT *
+          FROM users
+          JOIN orders ON users.id = orders.user_id
+          WHERE orders.status = 'active'
+        """)
+
+      assert length(result.joins) == 1
+      assert result.where != nil
+    end
+
+    test "parses JOIN with ORDER BY" do
+      {:select, result} =
+        SqlParser.parse("""
+          SELECT *
+          FROM users
+          JOIN orders ON users.id = orders.user_id
+          ORDER BY users.name
+        """)
+
+      assert length(result.joins) == 1
+      assert result.order_by != nil
+    end
+
+    test "parses comma-separated tables as implicit cross join" do
+      {:select, result} =
+        SqlParser.parse("SELECT * FROM users, orders")
+
+      assert result.table == "users"
+      assert length(result.joins) == 1
+      [join] = result.joins
+      assert join.type == :cross
+    end
+
+    test "parses JOIN with complex ON condition" do
+      {:select, result} =
+        SqlParser.parse("""
+          SELECT *
+          FROM users
+          JOIN orders ON users.id = orders.user_id AND orders.status = 'active'
+        """)
+
+      [join] = result.joins
+      {:on, condition} = join.condition
+      assert {:and, _, _} = condition
+    end
+  end
 end

@@ -2608,7 +2608,10 @@ defmodule OracleDb.SqlParser do
     end
   end
 
-  defp parse_alter_type_action(_), do: {:error, nil}
+  defp parse_alter_type_action(tokens) do
+    IO.puts("[DEBUG sql_parser.ex:parse_alter_type_action] Unhandled ALTER TYPE action tokens: #{inspect(tokens)}")
+    {:error, nil}
+  end
 
   defp parse_alter_table([table | rest]) do
     {action, details} = parse_alter_action(rest)
@@ -2672,7 +2675,10 @@ defmodule OracleDb.SqlParser do
     end
   end
 
-  defp parse_alter_action(_), do: {:error, nil}
+  defp parse_alter_action(tokens) do
+    IO.puts("[DEBUG sql_parser.ex:parse_alter_action] Unhandled ALTER TABLE action tokens: #{inspect(tokens)}")
+    {:error, nil}
+  end
 
   # Helper function to find a keyword in tokens
   defp find_keyword(tokens, keyword) do

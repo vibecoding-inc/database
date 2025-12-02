@@ -1781,7 +1781,10 @@ defmodule OracleDb.Storage do
     parse_raw_condition(row, tokens)
   end
 
-  defp evaluate_condition(_row, _), do: true
+  defp evaluate_condition(_row, condition) do
+    IO.puts("[DEBUG storage.ex:evaluate_condition] Unhandled condition type: #{inspect(condition)}")
+    true
+  end
 
   # Check if a column exists in the row (case-insensitive)
   defp column_exists?(row, column) when is_binary(column) do
@@ -1840,7 +1843,10 @@ defmodule OracleDb.Storage do
     compare(row_value, "<=", parse_token_value(val))
   end
 
-  defp parse_raw_condition(_row, _), do: true
+  defp parse_raw_condition(_row, tokens) do
+    IO.puts("[DEBUG storage.ex:parse_raw_condition] Unhandled raw condition tokens: #{inspect(tokens)}")
+    true
+  end
 
   defp parse_token_value({:string, val}), do: val
 
@@ -2325,7 +2331,10 @@ defmodule OracleDb.Storage do
     end
   end
 
-  defp evaluate_function(_, _, _, _), do: nil
+  defp evaluate_function(func_name, args, _row, _rownum) do
+    IO.puts("[DEBUG storage.ex:evaluate_function] Unhandled function: #{inspect(func_name)} with args: #{inspect(args)}")
+    nil
+  end
 
   # XML Helper Functions
 

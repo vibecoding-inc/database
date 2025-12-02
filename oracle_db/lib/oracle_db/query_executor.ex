@@ -505,9 +505,13 @@ defmodule OracleDb.QueryExecutor do
     Enum.map(args, fn
       {:literal, value} -> value
       # Identifiers would need context to resolve
-      {:identifier, _name} -> nil
+      {:identifier, name} ->
+        IO.puts("[DEBUG query_executor.ex:resolve_call_arguments] Unable to resolve identifier: #{inspect(name)}")
+        nil
       # Bind variables would need context to resolve
-      {:bind_var, _name} -> nil
+      {:bind_var, name} ->
+        IO.puts("[DEBUG query_executor.ex:resolve_call_arguments] Unable to resolve bind variable: #{inspect(name)}")
+        nil
       other -> other
     end)
   end

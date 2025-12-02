@@ -582,4 +582,127 @@ defmodule OracleDbTest do
       assert {:error, _} = result
     end
   end
+
+  describe "Object-Relational Tables" do
+    test "CREATE TABLE OF type_name creates object table", %{db: db} do
+      # First create the type
+      OracleDb.execute(db, "CREATE TYPE person_t AS OBJECT (id NUMBER, name VARCHAR2(100))")
+
+      # Then create the object table
+      result = OracleDb.execute(db, "CREATE TABLE persons OF person_t")
+      assert {:ok, %{message: "Table PERSONS created"}} = result
+      assert OracleDb.table_exists?(db, "persons")
+    end
+
+    test "CREATE TABLE OF with constraints", %{db: db} do
+      OracleDb.execute(
+        db,
+        "CREATE TYPE emp_type AS OBJECT (emp_id NUMBER, emp_name VARCHAR2(100))"
+      )
+
+      result =
+        OracleDb.execute(
+          db,
+          "CREATE TABLE employees OF emp_type (PRIMARY KEY (emp_id))"
+        )
+
+      assert {:ok, %{message: "Table EMPLOYEES created"}} = result
+    end
+  end
+
+  describe "Views" do
+    setup %{db: db} do
+      OracleDb.execute(
+        db,
+        "CREATE TABLE base_table (id NUMBER, name VARCHAR2(100), value NUMBER)"
+      )
+
+      OracleDb.execute(db, "INSERT INTO base_table VALUES (1, 'Alice', 100)")
+      OracleDb.execute(db, "INSERT INTO base_table VALUES (2, 'Bob', 200)")
+      :ok
+    end
+
+    test "CREATE VIEW creates a simple view", %{db: db} do
+      result = OracleDb.execute(db, "CREATE VIEW test_view AS SELECT id, name FROM base_table")
+      assert {:ok, %{message: "View TEST_VIEW created"}} = result
+    end
+
+    test "CREATE OR REPLACE VIEW replaces existing view", %{db: db} do
+      OracleDb.execute(db, "CREATE VIEW my_view AS SELECT id FROM base_table")
+
+      result =
+        OracleDb.execute(db, "CREATE OR REPLACE VIEW my_view AS SELECT id, name FROM base_table")
+
+      assert {:ok, %{message: "View MY_VIEW created"}} = result
+    end
+
+    test "CREATE VIEW with column list", %{db: db} do
+      result =
+        OracleDb.execute(
+          db,
+          "CREATE VIEW named_view (col1, col2) AS SELECT id, name FROM base_table"
+        )
+
+      assert {:ok, %{message: "View NAMED_VIEW created"}} = result
+    end
+
+    test "CREATE VIEW with WHERE clause", %{db: db} do
+      result =
+        OracleDb.execute(
+          db,
+          "CREATE VIEW filtered_view AS SELECT id, name FROM base_table WHERE value > 100"
+        )
+
+      assert {:ok, %{message: "View FILTERED_VIEW created"}} = result
+    end
+
+    test "DROP VIEW removes a view", %{db: db} do
+      OracleDb.execute(db, "CREATE VIEW drop_me AS SELECT id FROM base_table")
+      result = OracleDb.execute(db, "DROP VIEW drop_me")
+      assert {:ok, %{message: "View DROP_ME dropped"}} = result
+    end
+
+    test "returns error for duplicate view creation", %{db: db} do
+      OracleDb.execute(db, "CREATE VIEW dup_view AS SELECT id FROM base_table")
+      result = OracleDb.execute(db, "CREATE VIEW dup_view AS SELECT id FROM base_table")
+      assert {:error, _} = result
+    end
+
+    test "returns error for dropping non-existent view", %{db: db} do
+      result = OracleDb.execute(db, "DROP VIEW nonexistent_view")
+      assert {:error, _} = result
+    end
+  end
+
+  describe "Materialized Views" do
+    setup %{db: db} do
+      OracleDb.execute(db, "CREATE TABLE mv_source (id NUMBER, data VARCHAR2(100))")
+      OracleDb.execute(db, "INSERT INTO mv_source VALUES (1, 'test1')")
+      :ok
+    end
+
+    test "CREATE MATERIALIZED VIEW creates a materialized view", %{db: db} do
+      result =
+        OracleDb.execute(db, "CREATE MATERIALIZED VIEW mv_test AS SELECT id, data FROM mv_source")
+
+      assert {:ok, %{message: "Materialized view MV_TEST created"}} = result
+    end
+
+    test "DROP MATERIALIZED VIEW removes a materialized view", %{db: db} do
+      OracleDb.execute(db, "CREATE MATERIALIZED VIEW mv_drop AS SELECT id FROM mv_source")
+      result = OracleDb.execute(db, "DROP MATERIALIZED VIEW mv_drop")
+      assert {:ok, %{message: "Materialized view MV_DROP dropped"}} = result
+    end
+
+    test "returns error for duplicate materialized view creation", %{db: db} do
+      OracleDb.execute(db, "CREATE MATERIALIZED VIEW mv_dup AS SELECT id FROM mv_source")
+      result = OracleDb.execute(db, "CREATE MATERIALIZED VIEW mv_dup AS SELECT id FROM mv_source")
+      assert {:error, _} = result
+    end
+
+    test "returns error for dropping non-existent materialized view", %{db: db} do
+      result = OracleDb.execute(db, "DROP MATERIALIZED VIEW nonexistent_mv")
+      assert {:error, _} = result
+    end
+  end
 end

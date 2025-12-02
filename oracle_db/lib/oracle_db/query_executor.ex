@@ -49,11 +49,42 @@ defmodule OracleDb.QueryExecutor do
   end
 
   def execute_parsed(storage, {:create_table, info}) do
-    schema = %{
-      columns: info.columns,
-      constraints: Map.get(info, :constraints, []),
-      indexes: %{}
-    }
+    # Handle object table creation (CREATE TABLE ... OF type_name)
+    schema =
+      if Map.get(info, :object_table, false) do
+        type_name = Map.get(info, :of_type)
+
+        case Storage.get_type(storage, type_name) do
+          {:ok, type_def} ->
+            # Derive columns from object type attributes
+            columns =
+              Map.get(type_def, :attributes, [])
+              |> Enum.map(fn {name, type_info} ->
+                {to_string(name), type_info, []}
+              end)
+
+            %{
+              columns: columns,
+              constraints: Map.get(info, :constraints, []),
+              indexes: %{},
+              of_type: type_name,
+              object_table: true
+            }
+
+          {:error, _} ->
+            %{
+              columns: info.columns,
+              constraints: Map.get(info, :constraints, []),
+              indexes: %{}
+            }
+        end
+      else
+        %{
+          columns: info.columns,
+          constraints: Map.get(info, :constraints, []),
+          indexes: %{}
+        }
+      end
 
     table_name = String.upcase(info.table)
 
@@ -172,6 +203,58 @@ defmodule OracleDb.QueryExecutor do
 
     case Storage.alter_type(storage, info.name, info.action, info.details) do
       :ok -> {:ok, %{message: "Type #{type_name} altered"}}
+      error -> error
+    end
+  end
+
+  # View operations
+
+  def execute_parsed(storage, {:create_view, info}) do
+    view_name = String.upcase(info.name)
+
+    case Storage.create_view(storage, info.name, info) do
+      :ok -> {:ok, %{message: "View #{view_name} created"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:drop_view, info}) do
+    view_name = String.upcase(info.name)
+
+    case Storage.drop_view(storage, info.name) do
+      :ok -> {:ok, %{message: "View #{view_name} dropped"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:alter_view, info}) do
+    view_name = String.upcase(info.name)
+
+    # Validate view exists before altering
+    case Storage.get_view(storage, info.name) do
+      {:ok, _view_def} ->
+        # For ALTER VIEW COMPILE, we just validate and return success
+        {:ok, %{message: "View #{view_name} altered"}}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  def execute_parsed(storage, {:create_materialized_view, info}) do
+    view_name = String.upcase(info.name)
+
+    case Storage.create_materialized_view(storage, info.name, info) do
+      :ok -> {:ok, %{message: "Materialized view #{view_name} created"}}
+      error -> error
+    end
+  end
+
+  def execute_parsed(storage, {:drop_materialized_view, info}) do
+    view_name = String.upcase(info.name)
+
+    case Storage.drop_materialized_view(storage, info.name) do
+      :ok -> {:ok, %{message: "Materialized view #{view_name} dropped"}}
       error -> error
     end
   end

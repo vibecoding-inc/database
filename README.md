@@ -20,6 +20,14 @@ An in-memory relational database implemented in Elixir that is compatible with O
 - `ALTER TYPE` - Add, drop, or modify type attributes
 - Member functions, static methods, and constructors
 
+### Object-Relational Tables and Views
+- `CREATE TABLE ... OF type_name` - Create object tables based on object types
+- `CREATE VIEW` - Create views with SELECT queries
+- `CREATE OR REPLACE VIEW` - Create or replace existing views
+- `DROP VIEW` - Remove views
+- `CREATE MATERIALIZED VIEW` - Create materialized views
+- `DROP MATERIALIZED VIEW` - Remove materialized views
+
 ### DML (Data Manipulation Language)
 - `SELECT` - Query data with WHERE, ORDER BY, and column projections
 - `INSERT` - Insert rows into tables
@@ -141,6 +149,39 @@ OracleDb.execute(db, "ALTER TYPE person_type ADD ATTRIBUTE birth_date DATE")
 
 # Drop a type
 OracleDb.execute(db, "DROP TYPE address_type")
+```
+
+### Object-Relational Tables
+
+```elixir
+# Create an object table based on a type
+OracleDb.execute(db, "CREATE TYPE person_t AS OBJECT (id NUMBER, name VARCHAR2(100))")
+OracleDb.execute(db, "CREATE TABLE persons OF person_t")
+
+# Create an object table with constraints
+OracleDb.execute(db, "CREATE TABLE employees OF person_t (PRIMARY KEY (id))")
+```
+
+### Views
+
+```elixir
+# Create a simple view
+OracleDb.execute(db, "CREATE VIEW active_users AS SELECT id, name FROM users WHERE status = 'active'")
+
+# Create or replace a view
+OracleDb.execute(db, "CREATE OR REPLACE VIEW user_summary AS SELECT id, name, email FROM users")
+
+# Create a view with explicit column names
+OracleDb.execute(db, "CREATE VIEW user_names (user_id, full_name) AS SELECT id, name FROM users")
+
+# Drop a view
+OracleDb.execute(db, "DROP VIEW active_users")
+
+# Create a materialized view
+OracleDb.execute(db, "CREATE MATERIALIZED VIEW user_counts AS SELECT status, COUNT(*) as cnt FROM users GROUP BY status")
+
+# Drop a materialized view
+OracleDb.execute(db, "DROP MATERIALIZED VIEW user_counts")
 ```
 
 ## Running Tests

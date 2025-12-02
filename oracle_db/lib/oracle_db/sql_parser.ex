@@ -729,7 +729,98 @@ defmodule OracleDb.SqlParser do
       ["SEQUENCE" | rest] -> parse_create_sequence(rest)
       ["TYPE" | rest] -> parse_create_type(rest)
       ["OR", "REPLACE", "TYPE" | rest] -> parse_create_type(rest, true)
+      ["VIEW" | rest] -> parse_create_view(rest)
+      ["OR", "REPLACE", "VIEW" | rest] -> parse_create_view(rest, true)
+      ["MATERIALIZED", "VIEW" | rest] -> parse_create_materialized_view(rest)
       _ -> {:error, "Unknown CREATE command"}
+    end
+  end
+
+  # Parse CREATE VIEW statement
+  defp parse_create_view(tokens, replace \\ false) do
+    case tokens do
+      [view_name, "AS" | rest] ->
+        # Parse the SELECT statement that defines the view
+        case parse_select(["SELECT" | rest]) do
+          {:select, select_info} ->
+            {:create_view,
+             %{
+               name: view_name,
+               query: select_info,
+               replace: replace
+             }}
+
+          error ->
+            error
+        end
+
+      [view_name, "(" | rest] ->
+        # View with explicit column names
+        {column_list, remaining} = parse_view_column_list(rest)
+
+        case remaining do
+          ["AS" | select_rest] ->
+            case parse_select(["SELECT" | select_rest]) do
+              {:select, select_info} ->
+                {:create_view,
+                 %{
+                   name: view_name,
+                   columns: column_list,
+                   query: select_info,
+                   replace: replace
+                 }}
+
+              error ->
+                error
+            end
+
+          _ ->
+            {:error, "Invalid CREATE VIEW syntax - expected AS"}
+        end
+
+      _ ->
+        {:error, "Invalid CREATE VIEW syntax"}
+    end
+  end
+
+  defp parse_view_column_list(tokens) do
+    parse_view_column_list(tokens, [])
+  end
+
+  defp parse_view_column_list([")" | rest], acc) do
+    {Enum.reverse(acc), rest}
+  end
+
+  defp parse_view_column_list(["," | rest], acc) do
+    parse_view_column_list(rest, acc)
+  end
+
+  defp parse_view_column_list([col | rest], acc) do
+    parse_view_column_list(rest, [col | acc])
+  end
+
+  defp parse_view_column_list([], acc) do
+    {Enum.reverse(acc), []}
+  end
+
+  # Parse CREATE MATERIALIZED VIEW statement
+  defp parse_create_materialized_view(tokens) do
+    case tokens do
+      [view_name, "AS" | rest] ->
+        case parse_select(["SELECT" | rest]) do
+          {:select, select_info} ->
+            {:create_materialized_view,
+             %{
+               name: view_name,
+               query: select_info
+             }}
+
+          error ->
+            error
+        end
+
+      _ ->
+        {:error, "Invalid CREATE MATERIALIZED VIEW syntax"}
     end
   end
 
@@ -1088,6 +1179,29 @@ defmodule OracleDb.SqlParser do
     {:create_table, %{table: table, columns: columns, constraints: constraints}}
   end
 
+  defp parse_create_table([table, "OF", type_name | rest]) do
+    # CREATE TABLE ... OF type_name (object table)
+    # Optional constraints can follow
+    constraints =
+      case rest do
+        ["(" | constraint_rest] ->
+          {_, constraints} = parse_column_definitions(constraint_rest)
+          constraints
+
+        _ ->
+          []
+      end
+
+    {:create_table,
+     %{
+       table: table,
+       of_type: type_name,
+       columns: [],
+       constraints: constraints,
+       object_table: true
+     }}
+  end
+
   defp parse_create_table([table | rest]) do
     # CREATE TABLE AS SELECT ...
     case rest do
@@ -1422,6 +1536,12 @@ defmodule OracleDb.SqlParser do
         force = "FORCE" in Enum.map(rest, &String.upcase/1)
         {:drop_type, %{name: name, force: force}}
 
+      ["VIEW", name | _] ->
+        {:drop_view, %{name: name}}
+
+      ["MATERIALIZED", "VIEW", name | _] ->
+        {:drop_materialized_view, %{name: name}}
+
       _ ->
         {:error, "Unknown DROP command"}
     end
@@ -1432,7 +1552,21 @@ defmodule OracleDb.SqlParser do
     case tl(tokens) do
       ["TABLE" | rest] -> parse_alter_table(rest)
       ["TYPE" | rest] -> parse_alter_type(rest)
+      ["VIEW" | rest] -> parse_alter_view(rest)
       _ -> {:error, "Unknown ALTER command"}
+    end
+  end
+
+  defp parse_alter_view([view_name | rest]) do
+    case rest do
+      ["COMPILE" | _] ->
+        {:alter_view, %{name: view_name, action: :compile}}
+
+      ["ADD", "CONSTRAINT" | constraint_rest] ->
+        {:alter_view, %{name: view_name, action: :add_constraint, details: constraint_rest}}
+
+      _ ->
+        {:error, "Invalid ALTER VIEW syntax"}
     end
   end
 

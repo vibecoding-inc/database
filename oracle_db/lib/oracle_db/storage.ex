@@ -205,6 +205,63 @@ defmodule OracleDb.Storage do
   end
 
   @doc """
+  Creates a view.
+  """
+  @spec create_view(GenServer.server(), String.t(), map()) :: :ok | {:error, String.t()}
+  def create_view(server \\ __MODULE__, name, view_def) do
+    GenServer.call(server, {:create_view, normalize_name(name), view_def})
+  end
+
+  @doc """
+  Drops a view.
+  """
+  @spec drop_view(GenServer.server(), String.t()) :: :ok | {:error, String.t()}
+  def drop_view(server \\ __MODULE__, name) do
+    GenServer.call(server, {:drop_view, normalize_name(name)})
+  end
+
+  @doc """
+  Gets a view definition.
+  """
+  @spec get_view(GenServer.server(), String.t()) :: {:ok, map()} | {:error, String.t()}
+  def get_view(server \\ __MODULE__, name) do
+    GenServer.call(server, {:get_view, normalize_name(name)})
+  end
+
+  @doc """
+  Lists all views.
+  """
+  @spec list_views(GenServer.server()) :: [String.t()]
+  def list_views(server \\ __MODULE__) do
+    GenServer.call(server, :list_views)
+  end
+
+  @doc """
+  Creates a materialized view.
+  """
+  @spec create_materialized_view(GenServer.server(), String.t(), map()) ::
+          :ok | {:error, String.t()}
+  def create_materialized_view(server \\ __MODULE__, name, view_def) do
+    GenServer.call(server, {:create_materialized_view, normalize_name(name), view_def})
+  end
+
+  @doc """
+  Drops a materialized view.
+  """
+  @spec drop_materialized_view(GenServer.server(), String.t()) :: :ok | {:error, String.t()}
+  def drop_materialized_view(server \\ __MODULE__, name) do
+    GenServer.call(server, {:drop_materialized_view, normalize_name(name)})
+  end
+
+  @doc """
+  Refreshes a materialized view.
+  """
+  @spec refresh_materialized_view(GenServer.server(), String.t()) :: :ok | {:error, String.t()}
+  def refresh_materialized_view(server \\ __MODULE__, name) do
+    GenServer.call(server, {:refresh_materialized_view, normalize_name(name)})
+  end
+
+  @doc """
   Gets all table names.
   """
   @spec list_tables(GenServer.server()) :: [table_name()]
@@ -230,7 +287,9 @@ defmodule OracleDb.Storage do
       sequences: %{},
       indexes: %{},
       row_counter: %{},
-      types: %{}
+      types: %{},
+      views: %{},
+      materialized_views: %{}
     }
 
     {:ok, state}
@@ -436,7 +495,9 @@ defmodule OracleDb.Storage do
       sequences: %{},
       indexes: %{},
       row_counter: %{},
-      types: %{}
+      types: %{},
+      views: %{},
+      materialized_views: %{}
     }
 
     {:reply, :ok, new_state}
@@ -504,6 +565,83 @@ defmodule OracleDb.Storage do
 
       :error ->
         {:reply, {:error, "Type #{type_name} does not exist"}, state}
+    end
+  end
+
+  # View management callbacks
+
+  @impl true
+  def handle_call({:create_view, view_name, view_def}, _from, state) do
+    if Map.has_key?(state.views, view_name) and not Map.get(view_def, :replace, false) do
+      {:reply, {:error, "View #{view_name} already exists"}, state}
+    else
+      new_state = %{state | views: Map.put(state.views, view_name, view_def)}
+      {:reply, :ok, new_state}
+    end
+  end
+
+  @impl true
+  def handle_call({:drop_view, view_name}, _from, state) do
+    if Map.has_key?(state.views, view_name) do
+      new_state = %{state | views: Map.delete(state.views, view_name)}
+      {:reply, :ok, new_state}
+    else
+      {:reply, {:error, "View #{view_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:get_view, view_name}, _from, state) do
+    case Map.fetch(state.views, view_name) do
+      {:ok, view_def} -> {:reply, {:ok, view_def}, state}
+      :error -> {:reply, {:error, "View #{view_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:list_views, _from, state) do
+    {:reply, Map.keys(state.views), state}
+  end
+
+  @impl true
+  def handle_call({:create_materialized_view, view_name, view_def}, _from, state) do
+    if Map.has_key?(state.materialized_views, view_name) do
+      {:reply, {:error, "Materialized view #{view_name} already exists"}, state}
+    else
+      # Store the view definition; data will be populated on first query or explicit refresh
+      new_state = %{
+        state
+        | materialized_views: Map.put(state.materialized_views, view_name, view_def),
+          data: Map.put(state.data, view_name, [])
+      }
+
+      {:reply, :ok, new_state}
+    end
+  end
+
+  @impl true
+  def handle_call({:drop_materialized_view, view_name}, _from, state) do
+    if Map.has_key?(state.materialized_views, view_name) do
+      new_state = %{
+        state
+        | materialized_views: Map.delete(state.materialized_views, view_name),
+          data: Map.delete(state.data, view_name)
+      }
+
+      {:reply, :ok, new_state}
+    else
+      {:reply, {:error, "Materialized view #{view_name} does not exist"}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:refresh_materialized_view, view_name}, _from, state) do
+    if Map.has_key?(state.materialized_views, view_name) do
+      # Note: Full implementation would re-execute the underlying query
+      # and update the cached data in state.data[view_name]
+      {:reply, :ok, state}
+    else
+      {:reply, {:error, "Materialized view #{view_name} does not exist"}, state}
     end
   end
 

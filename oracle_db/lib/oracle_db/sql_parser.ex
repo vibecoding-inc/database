@@ -4,6 +4,9 @@ defmodule OracleDb.SqlParser do
   Parses SQL statements into structured AST representations.
   """
 
+  # SQL reserved keywords that terminate table/alias parsing in FROM clause
+  @from_terminating_keywords ~w(WHERE ORDER GROUP HAVING INNER LEFT RIGHT FULL CROSS NATURAL JOIN ON USING ,)
+
   @type parsed_statement ::
           {:select, map()}
           | {:insert, map()}
@@ -478,7 +481,7 @@ defmodule OracleDb.SqlParser do
         upcase = String.upcase(alias_candidate)
 
         cond do
-          upcase in ["WHERE", "ORDER", "GROUP", "HAVING", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "NATURAL", "JOIN", "ON", "USING", ","] ->
+          upcase in @from_terminating_keywords ->
             {{normalize_token(table), nil}, rest}
 
           upcase == "AS" ->

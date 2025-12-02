@@ -1485,15 +1485,15 @@ defmodule OracleDb.Storage do
 
   # Natural join: join on all columns with the same name
   defp execute_natural_join(left_rows, right_rows, _join_type) do
-    if left_rows == [] or right_rows == [] do
+    if Enum.empty?(left_rows) or Enum.empty?(right_rows) do
       []
     else
       # Find common column names (excluding prefixed columns)
-      left_keys = Map.keys(hd(left_rows)) |> Enum.map(&to_string/1) |> Enum.reject(&String.contains?(&1, ".")) |> Enum.reject(&String.starts_with?(&1, "__"))
-      right_keys = Map.keys(hd(right_rows)) |> Enum.map(&to_string/1) |> Enum.reject(&String.contains?(&1, ".")) |> Enum.reject(&String.starts_with?(&1, "__"))
+      left_keys = extract_unprefixed_column_names(hd(left_rows))
+      right_keys = extract_unprefixed_column_names(hd(right_rows))
       common_cols = MapSet.intersection(MapSet.new(left_keys), MapSet.new(right_keys)) |> MapSet.to_list()
 
-      if common_cols == [] do
+      if Enum.empty?(common_cols) do
         # No common columns - do cross join
         execute_cross_join(left_rows, right_rows)
       else
@@ -1504,6 +1504,15 @@ defmodule OracleDb.Storage do
             do: Map.merge(left_row, right_row)
       end
     end
+  end
+
+  # Extract column names that are not prefixed with table names or internal markers
+  defp extract_unprefixed_column_names(row) do
+    row
+    |> Map.keys()
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&String.contains?(&1, "."))
+    |> Enum.reject(&String.starts_with?(&1, "__"))
   end
 
   defp natural_join_matches?(left_row, right_row, common_cols) do
@@ -1543,7 +1552,7 @@ defmodule OracleDb.Storage do
   end
 
   defp evaluate_join_on(row, {:comparison, col1, op, col2}, _left_alias, _right_alias) do
-    # Both sides could be column references
+    # Both sides are column references or literal values
     val1 = resolve_join_column(row, col1)
     val2 = resolve_join_column(row, col2)
     compare(val1, op, val2)
@@ -1558,7 +1567,7 @@ defmodule OracleDb.Storage do
     evaluate_condition(row, condition)
   end
 
-  # Resolve column value in join context (might be table.column format)
+  # Resolve column value in join context (might be table.column format or literal)
   defp resolve_join_column(row, col) when is_binary(col) do
     # Try exact match first
     case Map.fetch(row, col) do
@@ -1574,14 +1583,9 @@ defmodule OracleDb.Storage do
             if String.upcase(to_string(k)) == upcase_col, do: v
           end)
 
-        # If still not found, it might be a literal value
+        # If still not found and doesn't look like a column reference, parse as literal
         if result == nil and not String.contains?(col, ".") do
-          # Check if it looks like a number
-          cond do
-            String.match?(col, ~r/^\d+$/) -> String.to_integer(col)
-            String.match?(col, ~r/^\d+\.\d+$/) -> String.to_float(col)
-            true -> col
-          end
+          parse_literal_value(col)
         else
           result
         end
@@ -1589,6 +1593,15 @@ defmodule OracleDb.Storage do
   end
 
   defp resolve_join_column(_row, val), do: val
+
+  # Parse a string that might be a literal numeric value
+  defp parse_literal_value(str) when is_binary(str) do
+    cond do
+      String.match?(str, ~r/^\d+$/) -> String.to_integer(str)
+      String.match?(str, ~r/^\d+\.\d+$/) -> String.to_float(str)
+      true -> str
+    end
+  end
 
   # Execute SELECT on a view by running the underlying query
   # Uses visited_views set to prevent circular references causing infinite recursion

@@ -1,10 +1,10 @@
-defmodule OracleDb.PlsqlInterpreterTest do
+defmodule VibeDb.PlsqlInterpreterTest do
   use ExUnit.Case
 
-  alias OracleDb.PlsqlInterpreter
+  alias VibeDb.PlsqlInterpreter
 
   setup do
-    {:ok, db} = OracleDb.start_link()
+    {:ok, db} = VibeDb.start_link()
     {:ok, db: db}
   end
 
@@ -223,7 +223,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
   describe "execute_procedure/3" do
     test "executes stored procedure", %{db: db} do
       # Create a procedure
-      OracleDb.execute(db, """
+      VibeDb.execute(db, """
         CREATE PROCEDURE say_hello (p_name IN VARCHAR2)
         IS
         BEGIN
@@ -248,7 +248,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
   describe "execute_function/3" do
     test "executes stored function", %{db: db} do
       # Create a function
-      OracleDb.execute(db, """
+      VibeDb.execute(db, """
         CREATE FUNCTION add_numbers (p_a NUMBER, p_b NUMBER)
         RETURN NUMBER
         IS
@@ -265,7 +265,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
 
     test "executes string function", %{db: db} do
       # Create a function that returns a string
-      OracleDb.execute(db, """
+      VibeDb.execute(db, """
         CREATE FUNCTION get_greeting (p_name VARCHAR2)
         RETURN VARCHAR2
         IS
@@ -290,7 +290,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
   describe "CALL statement integration" do
     test "CALL executes procedure", %{db: db} do
       # Create a simple procedure
-      OracleDb.execute(db, """
+      VibeDb.execute(db, """
         CREATE PROCEDURE greet_user (p_name IN VARCHAR2)
         IS
         BEGIN
@@ -298,14 +298,14 @@ defmodule OracleDb.PlsqlInterpreterTest do
         END;
       """)
 
-      result = OracleDb.execute(db, "CALL greet_user('Alice')")
+      result = VibeDb.execute(db, "CALL greet_user('Alice')")
 
       assert {:ok, %{message: message}} = result
       assert message =~ "GREET_USER"
     end
 
     test "EXEC executes procedure", %{db: db} do
-      OracleDb.execute(db, """
+      VibeDb.execute(db, """
         CREATE PROCEDURE simple_proc
         IS
         BEGIN
@@ -313,7 +313,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
         END;
       """)
 
-      result = OracleDb.execute(db, "EXEC simple_proc")
+      result = VibeDb.execute(db, "EXEC simple_proc")
 
       assert {:ok, %{message: message}} = result
       assert message =~ "SIMPLE_PROC"
@@ -323,7 +323,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
   describe "anonymous block execution" do
     test "executes BEGIN/END block", %{db: db} do
       result =
-        OracleDb.execute(db, """
+        VibeDb.execute(db, """
           BEGIN
             NULL;
           END;
@@ -334,7 +334,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
 
     test "executes DECLARE block", %{db: db} do
       result =
-        OracleDb.execute(db, """
+        VibeDb.execute(db, """
           DECLARE
             v_test NUMBER := 1;
           BEGIN
@@ -349,8 +349,8 @@ defmodule OracleDb.PlsqlInterpreterTest do
   describe "SELECT INTO statement" do
     test "executes SELECT INTO with single row", %{db: db} do
       # Create a table with data
-      OracleDb.execute(db, "CREATE TABLE test_select_into (id NUMBER, name VARCHAR2(100))")
-      OracleDb.execute(db, "INSERT INTO test_select_into VALUES (1, 'Alice')")
+      VibeDb.execute(db, "CREATE TABLE test_select_into (id NUMBER, name VARCHAR2(100))")
+      VibeDb.execute(db, "INSERT INTO test_select_into VALUES (1, 'Alice')")
 
       {:ok, storage} = get_storage(db)
 
@@ -370,7 +370,7 @@ defmodule OracleDb.PlsqlInterpreterTest do
 
   describe "DML statements in PL/SQL" do
     test "executes INSERT statement", %{db: db} do
-      OracleDb.execute(db, "CREATE TABLE test_dml (id NUMBER, name VARCHAR2(100))")
+      VibeDb.execute(db, "CREATE TABLE test_dml (id NUMBER, name VARCHAR2(100))")
 
       {:ok, storage} = get_storage(db)
 
@@ -384,13 +384,13 @@ defmodule OracleDb.PlsqlInterpreterTest do
       assert {:ok, _} = result
 
       # Verify the insert worked
-      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM test_dml")
+      {:ok, rows} = VibeDb.execute(db, "SELECT * FROM test_dml")
       assert length(rows) == 1
     end
 
     test "executes UPDATE statement", %{db: db} do
-      OracleDb.execute(db, "CREATE TABLE test_update (id NUMBER, name VARCHAR2(100))")
-      OracleDb.execute(db, "INSERT INTO test_update VALUES (1, 'Original')")
+      VibeDb.execute(db, "CREATE TABLE test_update (id NUMBER, name VARCHAR2(100))")
+      VibeDb.execute(db, "INSERT INTO test_update VALUES (1, 'Original')")
 
       {:ok, storage} = get_storage(db)
 
@@ -404,14 +404,14 @@ defmodule OracleDb.PlsqlInterpreterTest do
       assert {:ok, _} = result
 
       # Verify the update worked
-      {:ok, [row]} = OracleDb.execute(db, "SELECT * FROM test_update WHERE id = 1")
+      {:ok, [row]} = VibeDb.execute(db, "SELECT * FROM test_update WHERE id = 1")
       assert row["name"] == "Updated"
     end
 
     test "executes DELETE statement", %{db: db} do
-      OracleDb.execute(db, "CREATE TABLE test_delete (id NUMBER)")
-      OracleDb.execute(db, "INSERT INTO test_delete VALUES (1)")
-      OracleDb.execute(db, "INSERT INTO test_delete VALUES (2)")
+      VibeDb.execute(db, "CREATE TABLE test_delete (id NUMBER)")
+      VibeDb.execute(db, "INSERT INTO test_delete VALUES (1)")
+      VibeDb.execute(db, "INSERT INTO test_delete VALUES (2)")
 
       {:ok, storage} = get_storage(db)
 
@@ -425,14 +425,14 @@ defmodule OracleDb.PlsqlInterpreterTest do
       assert {:ok, _} = result
 
       # Verify the delete worked
-      {:ok, rows} = OracleDb.execute(db, "SELECT * FROM test_delete")
+      {:ok, rows} = VibeDb.execute(db, "SELECT * FROM test_delete")
       assert length(rows) == 1
     end
   end
 
   # Helper function to get the storage process from the db
   # Note: Using :sys.get_state is acceptable in tests for accessing internal state.
-  # In production code, consider adding a proper API function to OracleDb if needed.
+  # In production code, consider adding a proper API function to VibeDb if needed.
   defp get_storage(db) do
     state = :sys.get_state(db)
     {:ok, state.storage}

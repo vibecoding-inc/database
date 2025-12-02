@@ -1,6 +1,6 @@
-defmodule OracleDb.Storage do
+defmodule VibeDb.Storage do
   @moduledoc """
-  In-memory storage engine for the Oracle-compatible database.
+  In-memory storage engine for the VibeDb database.
   Stores tables, rows, indexes, sequences, and metadata.
   """
 
@@ -1221,13 +1221,13 @@ defmodule OracleDb.Storage do
   end
 
   defp execute_select(_state, nil, columns, _where, _order_by) do
-    # SELECT from DUAL or no table (Oracle allows SELECT 1 FROM DUAL)
+    # SELECT from DUAL or no table (VibeDb allows SELECT 1 FROM DUAL)
     row = evaluate_select_columns(%{}, columns, 1)
     {:ok, [row]}
   end
 
   defp execute_select(_state, "DUAL", columns, _where, _order_by) do
-    # Oracle's DUAL table
+    # VibeDb's DUAL table
     row = evaluate_select_columns(%{}, columns, 1)
     {:ok, [row]}
   end
@@ -2051,7 +2051,7 @@ defmodule OracleDb.Storage do
       end
 
     if is_binary(value) and is_integer(start_idx) do
-      # Oracle SUBSTR is 1-based
+      # VibeDb SUBSTR is 1-based
       if length do
         String.slice(value, start_idx - 1, length)
       else
@@ -2181,7 +2181,7 @@ defmodule OracleDb.Storage do
   end
 
   # XMLAGG aggregates XML fragments into a single XML document.
-  # Note: In Oracle, XMLAGG is typically used with GROUP BY to aggregate across rows.
+  # Note: In VibeDb, XMLAGG is typically used with GROUP BY to aggregate across rows.
   # In this single-row evaluation context, it returns the column value as-is.
   # Full aggregate behavior would require query-level aggregation support.
   defp evaluate_function("XMLAGG", args, row, _rownum) do

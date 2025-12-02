@@ -1,6 +1,6 @@
-# Oracle SQL-Compatible Relational Database
+# VibeDb SQL-Compatible Relational Database
 
-An in-memory relational database implemented in Elixir that is compatible with Oracle SQL syntax.
+An in-memory relational database implemented in Elixir that is compatible with VibeDb SQL syntax.
 
 ## Features
 
@@ -59,12 +59,12 @@ An in-memory relational database implemented in Elixir that is compatible with O
 - `UPDATE` - Update existing rows
 - `DELETE` - Delete rows from tables
 
-### Oracle-Specific Features
-- `DUAL` table - Oracle's single-row dummy table
+### VibeDb-Specific Features
+- `DUAL` table - VibeDb's single-row dummy table
 - `ROWNUM` - Row numbering pseudo-column
 - `SYSDATE` - Current system date
 - Sequences with `NEXTVAL` and `CURRVAL`
-- Oracle functions: `NVL`, `NVL2`, `COALESCE`, `DECODE`
+- VibeDb functions: `NVL`, `NVL2`, `COALESCE`, `DECODE`
 - String functions: `UPPER`, `LOWER`, `SUBSTR`, `LENGTH`, `TRIM`, `LTRIM`, `RTRIM`
 - Numeric functions: `ROUND`, `TRUNC`
 - Type conversion: `TO_CHAR`, `TO_NUMBER`, `TO_DATE`
@@ -93,51 +93,51 @@ Or enter a development shell:
 
 ```bash
 nix develop
-cd oracle_db
+cd vibe_db
 mix deps.get
 mix compile
 mix escript.build
-./oracle_db
+./vibe_db
 ```
 
 ### Manual Installation
 
 1. Make sure you have Elixir installed (1.14+)
-2. Navigate to the `oracle_db` directory
+2. Navigate to the `vibe_db` directory
 3. Run `mix deps.get` to fetch dependencies
 4. Run `mix compile` to compile the project
 5. Run `mix escript.build` to build the REPL binary
-6. Run `./oracle_db` to start the REPL
+6. Run `./vibe_db` to start the REPL
 
 ## Interactive REPL
 
 The database includes an interactive REPL (Read-Eval-Print Loop):
 
 ```bash
-$ ./oracle_db
-OracleDb REPL v0.1.0
+$ ./vibe_db
+VibeDb REPL v0.1.0
 Type .help for available commands, .exit to quit.
 
-oracle> CREATE TABLE users (id NUMBER, name VARCHAR2(100));
+vibedb> CREATE TABLE users (id NUMBER, name VARCHAR2(100));
 OK: Table USERS created
 
-oracle> INSERT INTO users VALUES (1, 'Alice');
+vibedb> INSERT INTO users VALUES (1, 'Alice');
 OK: 1 row(s) affected
 
-oracle> SELECT * FROM users;
+vibedb> SELECT * FROM users;
 | ID | NAME  |
 +----+-------+
 | 1  | Alice |
 1 row(s) returned
 
-oracle> .tables
+vibedb> .tables
 Tables:
   USERS
 
-oracle> .save mydb.xml
+vibedb> .save mydb.xml
 Database saved to mydb.xml
 
-oracle> .exit
+vibedb> .exit
 Goodbye!
 ```
 
@@ -174,23 +174,23 @@ The database supports saving and loading the complete database state to/from XML
 
 Example XML storage usage:
 ```bash
-oracle> CREATE TABLE users (id NUMBER, name VARCHAR2(100));
+vibedb> CREATE TABLE users (id NUMBER, name VARCHAR2(100));
 OK: Table USERS created
 
-oracle> INSERT INTO users VALUES (1, 'Alice');
+vibedb> INSERT INTO users VALUES (1, 'Alice');
 OK: 1 row(s) affected
 
-oracle> .save
+vibedb> .save
 Database saved to database.xml
 
-oracle> .exit
+vibedb> .exit
 Goodbye!
 
 # Later, restart the REPL and load the database:
-oracle> .load
+vibedb> .load
 Database loaded from database.xml
 
-oracle> SELECT * FROM users;
+vibedb> SELECT * FROM users;
 | ID | NAME  |
 +----+-------+
 | 1  | Alice |
@@ -201,10 +201,10 @@ oracle> SELECT * FROM users;
 
 ```elixir
 # Start the database
-{:ok, db} = OracleDb.start_link()
+{:ok, db} = VibeDb.start_link()
 
 # Create a table
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE TABLE users (
     id NUMBER PRIMARY KEY,
     name VARCHAR2(100) NOT NULL,
@@ -214,47 +214,47 @@ OracleDb.execute(db, """
 """)
 
 # Insert data
-OracleDb.execute(db, "INSERT INTO users (id, name, email) VALUES (1, 'John Doe', 'john@example.com')")
-OracleDb.execute(db, "INSERT INTO users (id, name) VALUES (2, 'Jane Smith')")
+VibeDb.execute(db, "INSERT INTO users (id, name, email) VALUES (1, 'John Doe', 'john@example.com')")
+VibeDb.execute(db, "INSERT INTO users (id, name) VALUES (2, 'Jane Smith')")
 
 # Query data
-{:ok, rows} = OracleDb.execute(db, "SELECT * FROM users")
-{:ok, rows} = OracleDb.execute(db, "SELECT * FROM users WHERE id = 1")
-{:ok, rows} = OracleDb.execute(db, "SELECT name, email FROM users ORDER BY name")
+{:ok, rows} = VibeDb.execute(db, "SELECT * FROM users")
+{:ok, rows} = VibeDb.execute(db, "SELECT * FROM users WHERE id = 1")
+{:ok, rows} = VibeDb.execute(db, "SELECT name, email FROM users ORDER BY name")
 
-# Use Oracle-specific features
-{:ok, rows} = OracleDb.execute(db, "SELECT SYSDATE FROM DUAL")
-{:ok, rows} = OracleDb.execute(db, "SELECT NVL(email, 'no email') AS email FROM users")
-{:ok, rows} = OracleDb.execute(db, "SELECT UPPER(name), SUBSTR(email, 1, 5) FROM users")
+# Use VibeDb-specific features
+{:ok, rows} = VibeDb.execute(db, "SELECT SYSDATE FROM DUAL")
+{:ok, rows} = VibeDb.execute(db, "SELECT NVL(email, 'no email') AS email FROM users")
+{:ok, rows} = VibeDb.execute(db, "SELECT UPPER(name), SUBSTR(email, 1, 5) FROM users")
 
 # Use sequences
-OracleDb.execute(db, "CREATE SEQUENCE user_seq START WITH 100 INCREMENT BY 1")
-{:ok, next_id} = OracleDb.nextval(db, "user_seq")
+VibeDb.execute(db, "CREATE SEQUENCE user_seq START WITH 100 INCREMENT BY 1")
+{:ok, next_id} = VibeDb.nextval(db, "user_seq")
 
 # Update data
-OracleDb.execute(db, "UPDATE users SET email = 'jane@example.com' WHERE id = 2")
+VibeDb.execute(db, "UPDATE users SET email = 'jane@example.com' WHERE id = 2")
 
 # Delete data
-OracleDb.execute(db, "DELETE FROM users WHERE id = 1")
+VibeDb.execute(db, "DELETE FROM users WHERE id = 1")
 
 # List tables
-tables = OracleDb.list_tables(db)
+tables = VibeDb.list_tables(db)
 
 # Check if table exists
-exists = OracleDb.table_exists?(db, "users")
+exists = VibeDb.table_exists?(db, "users")
 
 # Get table schema
-{:ok, schema} = OracleDb.get_schema(db, "users")
+{:ok, schema} = VibeDb.get_schema(db, "users")
 
 # Reset database (clear all data)
-OracleDb.reset(db)
+VibeDb.reset(db)
 ```
 
 ### Object-Relational Types
 
 ```elixir
 # Create an object type
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE TYPE address_type AS OBJECT (
     street VARCHAR2(100),
     city VARCHAR2(50),
@@ -263,7 +263,7 @@ OracleDb.execute(db, """
 """)
 
 # Create an object type with methods
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE TYPE person_type AS OBJECT (
     first_name VARCHAR2(50),
     last_name VARCHAR2(50),
@@ -272,59 +272,59 @@ OracleDb.execute(db, """
 """)
 
 # Create a nested table type
-OracleDb.execute(db, "CREATE TYPE phone_list AS TABLE OF VARCHAR2(20)")
+VibeDb.execute(db, "CREATE TYPE phone_list AS TABLE OF VARCHAR2(20)")
 
 # Create a VARRAY type
-OracleDb.execute(db, "CREATE TYPE color_array AS VARRAY(10) OF VARCHAR2(20)")
+VibeDb.execute(db, "CREATE TYPE color_array AS VARRAY(10) OF VARCHAR2(20)")
 
 # Create a subtype with inheritance
-OracleDb.execute(db, "CREATE TYPE employee_type UNDER person_type (emp_id NUMBER)")
+VibeDb.execute(db, "CREATE TYPE employee_type UNDER person_type (emp_id NUMBER)")
 
 # Alter a type - add attribute
-OracleDb.execute(db, "ALTER TYPE person_type ADD ATTRIBUTE birth_date DATE")
+VibeDb.execute(db, "ALTER TYPE person_type ADD ATTRIBUTE birth_date DATE")
 
 # Drop a type
-OracleDb.execute(db, "DROP TYPE address_type")
+VibeDb.execute(db, "DROP TYPE address_type")
 ```
 
 ### Object-Relational Tables
 
 ```elixir
 # Create an object table based on a type
-OracleDb.execute(db, "CREATE TYPE person_t AS OBJECT (id NUMBER, name VARCHAR2(100))")
-OracleDb.execute(db, "CREATE TABLE persons OF person_t")
+VibeDb.execute(db, "CREATE TYPE person_t AS OBJECT (id NUMBER, name VARCHAR2(100))")
+VibeDb.execute(db, "CREATE TABLE persons OF person_t")
 
 # Create an object table with constraints
-OracleDb.execute(db, "CREATE TABLE employees OF person_t (PRIMARY KEY (id))")
+VibeDb.execute(db, "CREATE TABLE employees OF person_t (PRIMARY KEY (id))")
 ```
 
 ### Views
 
 ```elixir
 # Create a simple view
-OracleDb.execute(db, "CREATE VIEW active_users AS SELECT id, name FROM users WHERE status = 'active'")
+VibeDb.execute(db, "CREATE VIEW active_users AS SELECT id, name FROM users WHERE status = 'active'")
 
 # Create or replace a view
-OracleDb.execute(db, "CREATE OR REPLACE VIEW user_summary AS SELECT id, name, email FROM users")
+VibeDb.execute(db, "CREATE OR REPLACE VIEW user_summary AS SELECT id, name, email FROM users")
 
 # Create a view with explicit column names
-OracleDb.execute(db, "CREATE VIEW user_names (user_id, full_name) AS SELECT id, name FROM users")
+VibeDb.execute(db, "CREATE VIEW user_names (user_id, full_name) AS SELECT id, name FROM users")
 
 # Drop a view
-OracleDb.execute(db, "DROP VIEW active_users")
+VibeDb.execute(db, "DROP VIEW active_users")
 
 # Create a materialized view
-OracleDb.execute(db, "CREATE MATERIALIZED VIEW user_counts AS SELECT status, COUNT(*) as cnt FROM users GROUP BY status")
+VibeDb.execute(db, "CREATE MATERIALIZED VIEW user_counts AS SELECT status, COUNT(*) as cnt FROM users GROUP BY status")
 
 # Drop a materialized view
-OracleDb.execute(db, "DROP MATERIALIZED VIEW user_counts")
+VibeDb.execute(db, "DROP MATERIALIZED VIEW user_counts")
 ```
 
 ### Object-Relational Views
 
 ```elixir
 # Create an object type for the view
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE TYPE employee_view_t AS OBJECT (
     emp_id NUMBER,
     emp_name VARCHAR2(100),
@@ -333,20 +333,20 @@ OracleDb.execute(db, """
 """)
 
 # Create an object view based on a type
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE VIEW employee_view OF employee_view_t AS
   SELECT employee_id, employee_name, employee_email FROM employees
 """)
 
 # Create an object view with OBJECT IDENTIFIER (OID)
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE VIEW employee_oid_view OF employee_view_t
   WITH OBJECT IDENTIFIER (emp_id) AS
   SELECT employee_id, employee_name, employee_email FROM employees
 """)
 
 # Create or replace an object view
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE OR REPLACE VIEW employee_view OF employee_view_t AS
   SELECT employee_id, employee_name, employee_email FROM employees WHERE active = 1
 """)
@@ -356,7 +356,7 @@ OracleDb.execute(db, """
 
 ```elixir
 # Create a simple stored procedure
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE PROCEDURE hello_proc (p_name IN VARCHAR2)
   IS
   BEGIN
@@ -365,7 +365,7 @@ OracleDb.execute(db, """
 """)
 
 # Create a procedure with OUT parameter
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE PROCEDURE get_user (p_id IN NUMBER, p_name OUT VARCHAR2)
   IS
   BEGIN
@@ -374,7 +374,7 @@ OracleDb.execute(db, """
 """)
 
 # Create a procedure with IN OUT parameter
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE PROCEDURE increment_value (p_value IN OUT NUMBER)
   IS
   BEGIN
@@ -383,7 +383,7 @@ OracleDb.execute(db, """
 """)
 
 # Replace an existing procedure
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE OR REPLACE PROCEDURE hello_proc (p_name IN VARCHAR2, p_greeting OUT VARCHAR2)
   IS
   BEGIN
@@ -392,14 +392,14 @@ OracleDb.execute(db, """
 """)
 
 # Drop a procedure
-OracleDb.execute(db, "DROP PROCEDURE hello_proc")
+VibeDb.execute(db, "DROP PROCEDURE hello_proc")
 ```
 
 ### Stored Functions
 
 ```elixir
 # Create a stored function
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE FUNCTION get_greeting (p_name VARCHAR2)
   RETURN VARCHAR2
   IS
@@ -409,7 +409,7 @@ OracleDb.execute(db, """
 """)
 
 # Create a function with multiple parameters
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE FUNCTION calculate_tax (p_amount NUMBER, p_rate NUMBER)
   RETURN NUMBER
   IS
@@ -419,17 +419,17 @@ OracleDb.execute(db, """
 """)
 
 # Replace an existing function
-OracleDb.execute(db, "CREATE OR REPLACE FUNCTION get_greeting (p_name VARCHAR2) RETURN VARCHAR2 IS BEGIN RETURN 'Hi ' || p_name; END;")
+VibeDb.execute(db, "CREATE OR REPLACE FUNCTION get_greeting (p_name VARCHAR2) RETURN VARCHAR2 IS BEGIN RETURN 'Hi ' || p_name; END;")
 
 # Drop a function
-OracleDb.execute(db, "DROP FUNCTION get_greeting")
+VibeDb.execute(db, "DROP FUNCTION get_greeting")
 ```
 
 ### Packages
 
 ```elixir
 # Create a package specification
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE PACKAGE user_pkg
   IS
     PROCEDURE add_user (p_name VARCHAR2);
@@ -438,7 +438,7 @@ OracleDb.execute(db, """
 """)
 
 # Create a package body
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE PACKAGE BODY user_pkg
   IS
     PROCEDURE add_user (p_name VARCHAR2)
@@ -458,20 +458,20 @@ OracleDb.execute(db, """
 """)
 
 # Replace a package
-OracleDb.execute(db, "CREATE OR REPLACE PACKAGE user_pkg IS PROCEDURE add_user (p_name VARCHAR2); END;")
+VibeDb.execute(db, "CREATE OR REPLACE PACKAGE user_pkg IS PROCEDURE add_user (p_name VARCHAR2); END;")
 
 # Drop a package body only
-OracleDb.execute(db, "DROP PACKAGE BODY user_pkg")
+VibeDb.execute(db, "DROP PACKAGE BODY user_pkg")
 
 # Drop an entire package
-OracleDb.execute(db, "DROP PACKAGE user_pkg")
+VibeDb.execute(db, "DROP PACKAGE user_pkg")
 ```
 
 ### Triggers
 
 ```elixir
 # Create a BEFORE INSERT trigger
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE TRIGGER audit_insert
   BEFORE INSERT ON users
   FOR EACH ROW
@@ -482,7 +482,7 @@ OracleDb.execute(db, """
 """)
 
 # Create an AFTER UPDATE trigger
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE TRIGGER audit_update
   AFTER UPDATE ON users
   FOR EACH ROW
@@ -493,7 +493,7 @@ OracleDb.execute(db, """
 """)
 
 # Create a trigger for multiple events
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE TRIGGER audit_changes
   BEFORE INSERT OR UPDATE OR DELETE ON users
   FOR EACH ROW
@@ -503,7 +503,7 @@ OracleDb.execute(db, """
 """)
 
 # Create a trigger with UPDATE OF specific columns
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE TRIGGER track_salary_changes
   BEFORE UPDATE OF salary ON employees
   FOR EACH ROW
@@ -513,7 +513,7 @@ OracleDb.execute(db, """
 """)
 
 # Create a trigger with WHEN clause
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE TRIGGER check_salary
   BEFORE INSERT ON employees
   FOR EACH ROW
@@ -524,7 +524,7 @@ OracleDb.execute(db, """
 """)
 
 # Create INSTEAD OF trigger for views
-OracleDb.execute(db, """
+VibeDb.execute(db, """
   CREATE TRIGGER instead_insert
   INSTEAD OF INSERT ON user_view
   FOR EACH ROW
@@ -534,17 +534,17 @@ OracleDb.execute(db, """
 """)
 
 # Enable/disable a trigger
-OracleDb.execute(db, "ALTER TRIGGER audit_insert ENABLE")
-OracleDb.execute(db, "ALTER TRIGGER audit_insert DISABLE")
+VibeDb.execute(db, "ALTER TRIGGER audit_insert ENABLE")
+VibeDb.execute(db, "ALTER TRIGGER audit_insert DISABLE")
 
 # Drop a trigger
-OracleDb.execute(db, "DROP TRIGGER audit_insert")
+VibeDb.execute(db, "DROP TRIGGER audit_insert")
 ```
 
 ## Running Tests
 
 ```bash
-cd oracle_db
+cd vibe_db
 mix test
 ```
 
@@ -552,15 +552,15 @@ mix test
 ## Project Structure
 
 ```
-oracle_db/
+vibe_db/
 ├── lib/
-│   ├── oracle_db.ex           # Main API module
-│   └── oracle_db/
+│   ├── vibe_db.ex           # Main API module
+│   └── vibe_db/
 │       ├── sql_parser.ex      # SQL parsing
 │       ├── storage.ex         # In-memory storage engine
 │       └── query_executor.ex  # Query execution
 ├── test/
-│   ├── oracle_db_test.exs     # Integration tests
+│   ├── vibe_db_test.exs     # Integration tests
 │   ├── sql_parser_test.exs    # Parser tests
 │   └── test_helper.exs
 └── mix.exs                    # Project configuration

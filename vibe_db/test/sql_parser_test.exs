@@ -1,7 +1,7 @@
-defmodule OracleDb.SqlParserTest do
+defmodule VibeDb.SqlParserTest do
   use ExUnit.Case
 
-  alias OracleDb.SqlParser
+  alias VibeDb.SqlParser
 
   describe "SELECT parsing" do
     test "parses simple SELECT *" do

@@ -1,9 +1,9 @@
-defmodule OracleDb.MixProject do
+defmodule VibeDb.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :oracle_db,
+      app: :vibe_db,
       version: "0.1.0",
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
@@ -14,8 +14,8 @@ defmodule OracleDb.MixProject do
 
   defp escript do
     [
-      main_module: OracleDb.Repl,
-      name: "oracle_db"
+      main_module: VibeDb.Repl,
+      name: "vibe_db"
     ]
   end
 

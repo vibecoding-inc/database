@@ -1,9 +1,9 @@
-defmodule OracleDb.Repl do
+defmodule VibeDb.Repl do
   @moduledoc """
-  Interactive REPL (Read-Eval-Print Loop) for OracleDb.
+  Interactive REPL (Read-Eval-Print Loop) for VibeDb.
 
   Provides a command-line interface for executing SQL statements against
-  an in-memory Oracle-compatible database.
+  an in-memory VibeDb database.
 
   ## Commands
 
@@ -19,17 +19,17 @@ defmodule OracleDb.Repl do
 
   ## Examples
 
-      $ oracle_db
-      OracleDb REPL v0.1.0
+      $ vibe_db
+      VibeDb REPL v0.1.0
       Type .help for available commands, .exit to quit.
 
-      oracle> CREATE TABLE users (id NUMBER, name VARCHAR2(100));
+      vibedb> CREATE TABLE users (id NUMBER, name VARCHAR2(100));
       OK: Table USERS created
 
-      oracle> INSERT INTO users VALUES (1, 'Alice');
+      vibedb> INSERT INTO users VALUES (1, 'Alice');
       OK: 1 row(s) inserted
 
-      oracle> SELECT * FROM users;
+      vibedb> SELECT * FROM users;
       +----+-------+
       | ID | NAME  |
       +----+-------+
@@ -40,17 +40,17 @@ defmodule OracleDb.Repl do
   """
 
   @version Mix.Project.config()[:version] || "0.1.0"
-  @prompt "oracle> "
+  @prompt "vibedb> "
 
   @doc """
   Main entry point for the escript.
   """
   def main(_args \\ []) do
-    IO.puts("OracleDb REPL v#{@version}")
+    IO.puts("VibeDb REPL v#{@version}")
     IO.puts("Type .help for available commands, .exit to quit.")
     IO.puts("")
 
-    {:ok, db} = OracleDb.start_link()
+    {:ok, db} = VibeDb.start_link()
     loop(db)
   end
 
@@ -58,7 +58,7 @@ defmodule OracleDb.Repl do
   Starts the REPL with an existing database connection.
   """
   def start(db) do
-    IO.puts("OracleDb REPL v#{@version}")
+    IO.puts("VibeDb REPL v#{@version}")
     IO.puts("Type .help for available commands, .exit to quit.")
     IO.puts("")
     loop(db)
@@ -104,7 +104,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".tables") do
-    tables = OracleDb.list_tables(db)
+    tables = VibeDb.list_tables(db)
 
     if length(tables) == 0 do
       IO.puts("No tables.")
@@ -119,7 +119,7 @@ defmodule OracleDb.Repl do
   defp process_input(db, ".schema " <> table_name) do
     table_name = String.trim(table_name)
 
-    case OracleDb.get_schema(db, table_name) do
+    case VibeDb.get_schema(db, table_name) do
       {:ok, schema} ->
         IO.puts("Table: #{String.upcase(table_name)}")
         IO.puts("Columns:")
@@ -146,7 +146,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".types") do
-    types = OracleDb.list_types(db)
+    types = VibeDb.list_types(db)
 
     if length(types) == 0 do
       IO.puts("No types.")
@@ -159,7 +159,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".views") do
-    views = OracleDb.list_views(db)
+    views = VibeDb.list_views(db)
 
     if length(views) == 0 do
       IO.puts("No views.")
@@ -172,7 +172,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".sequences") do
-    sequences = OracleDb.list_sequences(db)
+    sequences = VibeDb.list_sequences(db)
 
     if length(sequences) == 0 do
       IO.puts("No sequences.")
@@ -185,7 +185,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".procedures") do
-    procedures = OracleDb.list_procedures(db)
+    procedures = VibeDb.list_procedures(db)
 
     if length(procedures) == 0 do
       IO.puts("No stored procedures.")
@@ -198,7 +198,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".functions") do
-    functions = OracleDb.list_functions(db)
+    functions = VibeDb.list_functions(db)
 
     if length(functions) == 0 do
       IO.puts("No stored functions.")
@@ -211,7 +211,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".packages") do
-    packages = OracleDb.list_packages(db)
+    packages = VibeDb.list_packages(db)
 
     if length(packages) == 0 do
       IO.puts("No packages.")
@@ -224,7 +224,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".triggers") do
-    triggers = OracleDb.list_triggers(db)
+    triggers = VibeDb.list_triggers(db)
 
     if length(triggers) == 0 do
       IO.puts("No triggers.")
@@ -237,7 +237,7 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".status") do
-    status = OracleDb.status(db)
+    status = VibeDb.status(db)
 
     IO.puts("Database Status:")
     IO.puts("  Tables:             #{status.tables}")
@@ -258,7 +258,7 @@ defmodule OracleDb.Repl do
   defp process_input(db, ".save " <> filename) do
     filename = String.trim(filename)
 
-    case OracleDb.save(db, filename) do
+    case VibeDb.save(db, filename) do
       :ok ->
         IO.puts("Database saved to #{filename}")
 
@@ -270,9 +270,9 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".save") do
-    filename = OracleDb.XmlStorage.default_filename()
+    filename = VibeDb.XmlStorage.default_filename()
 
-    case OracleDb.save(db, filename) do
+    case VibeDb.save(db, filename) do
       :ok ->
         IO.puts("Database saved to #{filename}")
 
@@ -286,7 +286,7 @@ defmodule OracleDb.Repl do
   defp process_input(db, ".load " <> filename) do
     filename = String.trim(filename)
 
-    case OracleDb.load(db, filename) do
+    case VibeDb.load(db, filename) do
       :ok ->
         IO.puts("Database loaded from #{filename}")
 
@@ -298,9 +298,9 @@ defmodule OracleDb.Repl do
   end
 
   defp process_input(db, ".load") do
-    filename = OracleDb.XmlStorage.default_filename()
+    filename = VibeDb.XmlStorage.default_filename()
 
-    case OracleDb.load(db, filename) do
+    case VibeDb.load(db, filename) do
       :ok ->
         IO.puts("Database loaded from #{filename}")
 
@@ -324,7 +324,7 @@ defmodule OracleDb.Repl do
     # Don't trim the trailing semicolon for PL/SQL blocks - they need it for proper parsing
     # The SqlParser will handle trimming the semicolon after validation
     sql = 
-      if OracleDb.SqlParser.is_plsql_block?(String.trim(sql)) do
+      if VibeDb.SqlParser.is_plsql_block?(String.trim(sql)) do
         sql
       else
         String.trim_trailing(sql, ";")
@@ -342,8 +342,8 @@ defmodule OracleDb.Repl do
         sql
 
       # Check if we're in a PL/SQL block that needs to continue until END;
-      OracleDb.SqlParser.is_plsql_block?(trimmed) and
-          not OracleDb.SqlParser.plsql_block_complete?(trimmed) ->
+      VibeDb.SqlParser.is_plsql_block?(trimmed) and
+          not VibeDb.SqlParser.plsql_block_complete?(trimmed) ->
         # Continue collecting input until the PL/SQL block is complete
         case IO.gets("     > ") do
           :eof ->
@@ -376,7 +376,7 @@ defmodule OracleDb.Repl do
   end
 
   defp execute_sql(db, sql) do
-    case OracleDb.execute(db, sql) do
+    case VibeDb.execute(db, sql) do
       {:ok, rows} when is_list(rows) ->
         print_results(rows)
 
@@ -510,7 +510,7 @@ defmodule OracleDb.Repl do
       .exit, .quit       Exit the REPL
 
     SQL commands:
-      Any valid Oracle SQL statement (end with semicolon for multi-line)
+      Any valid VibeDb SQL statement (end with semicolon for multi-line)
 
     Examples:
       CREATE TABLE users (id NUMBER, name VARCHAR2(100));

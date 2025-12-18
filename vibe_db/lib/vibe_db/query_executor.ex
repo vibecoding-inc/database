@@ -97,39 +97,44 @@ defmodule VibeDb.QueryExecutor do
         end
 
       select_info ->
-        with {:ok, rows} <-
-               Storage.select(
-                 storage,
-                 select_info.table,
-                 select_info.columns,
-                 select_info.where,
-                 select_info.order_by
-               ),
-             :ok <- Storage.create_table(storage, info.table, schema) do
-          insert_result =
-            if length(rows) > 0 do
-              columns = Map.keys(hd(rows))
-              values = Enum.map(rows, fn row -> Enum.map(columns, &Map.get(row, &1)) end)
-              Storage.insert(storage, info.table, columns, values)
-            else
-              {:ok, 0}
-            end
+        case Storage.select(
+               storage,
+               select_info.table,
+               select_info.columns,
+               select_info.where,
+               select_info.order_by
+             ) do
+          {:ok, rows} ->
+            case Storage.create_table(storage, info.table, schema) do
+              :ok ->
+                insert_result =
+                  if length(rows) > 0 do
+                    columns = Map.keys(hd(rows))
+                    values = Enum.map(rows, fn row -> Enum.map(columns, &Map.get(row, &1)) end)
+                    Storage.insert(storage, info.table, columns, values)
+                  else
+                    {:ok, 0}
+                  end
 
-          case insert_result do
-            {:ok, _} ->
-              {:ok, %{message: "Table #{table_name} created"}}
+                case insert_result do
+                  {:ok, _} ->
+                    {:ok, %{message: "Table #{table_name} created"}}
 
-            {:error, _} = error ->
-              _ =
-                case Storage.drop_table(storage, info.table) do
-                  :ok -> :ok
-                  {:error, _} -> :ok
+                  {:error, _} = error ->
+                    case Storage.drop_table(storage, info.table) do
+                      :ok -> :ok
+                      {:error, _} -> :ok
+                    end
+
+                    error
                 end
 
-              error
-          end
-        else
-          {:error, _} = error -> error
+              error ->
+                error
+            end
+
+          {:error, _} = error ->
+            error
         end
     end
   end

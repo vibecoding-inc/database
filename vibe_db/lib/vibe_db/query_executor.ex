@@ -489,12 +489,14 @@ defmodule VibeDb.QueryExecutor do
         case Storage.create_table(storage, info.table, schema) do
           :ok ->
             insert_result =
-              if length(rows) > 0 do
-                columns = Map.keys(hd(rows))
-                values = Enum.map(rows, fn row -> Enum.map(columns, &Map.get(row, &1)) end)
-                Storage.insert(storage, info.table, columns, values)
-              else
-                {:ok, 0}
+              case rows do
+                [] ->
+                  {:ok, 0}
+
+                [first_row | _] ->
+                  columns = Map.keys(first_row)
+                  values = Enum.map(rows, fn row -> Enum.map(columns, &Map.get(row, &1)) end)
+                  Storage.insert(storage, info.table, columns, values)
               end
 
             case insert_result do
@@ -516,7 +518,7 @@ defmodule VibeDb.QueryExecutor do
   end
 
   defp drop_table_ignore_errors(storage, table_name) do
-    case Storage.drop_table(storage, table_name) do
+    case Storage.drop_table(storage, table_name, false) do
       :ok -> :ok
       _ -> :ok
     end

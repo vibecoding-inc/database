@@ -97,45 +97,7 @@ defmodule VibeDb.QueryExecutor do
         end
 
       select_info ->
-        case Storage.select(
-               storage,
-               select_info.table,
-               select_info.columns,
-               select_info.where,
-               select_info.order_by
-             ) do
-          {:ok, rows} ->
-            case Storage.create_table(storage, info.table, schema) do
-              :ok ->
-                insert_result =
-                  if length(rows) > 0 do
-                    columns = Map.keys(hd(rows))
-                    values = Enum.map(rows, fn row -> Enum.map(columns, &Map.get(row, &1)) end)
-                    Storage.insert(storage, info.table, columns, values)
-                  else
-                    {:ok, 0}
-                  end
-
-                case insert_result do
-                  {:ok, _} ->
-                    {:ok, %{message: "Table #{table_name} created"}}
-
-                  {:error, _} = error ->
-                    case Storage.drop_table(storage, info.table) do
-                      :ok -> :ok
-                      {:error, _} -> :ok
-                    end
-
-                    error
-                end
-
-              error ->
-                error
-            end
-
-          {:error, _} = error ->
-            error
-        end
+        execute_create_table_as_select(storage, info, schema, table_name, select_info)
     end
   end
 
@@ -513,6 +475,51 @@ defmodule VibeDb.QueryExecutor do
 
   def execute_parsed(_storage, unknown) do
     {:error, "Unknown statement type: #{inspect(unknown)}"}
+  end
+
+  defp execute_create_table_as_select(storage, info, schema, table_name, select_info) do
+    case Storage.select(
+           storage,
+           select_info.table,
+           select_info.columns,
+           select_info.where,
+           select_info.order_by
+         ) do
+      {:ok, rows} ->
+        case Storage.create_table(storage, info.table, schema) do
+          :ok ->
+            insert_result =
+              if length(rows) > 0 do
+                columns = Map.keys(hd(rows))
+                values = Enum.map(rows, fn row -> Enum.map(columns, &Map.get(row, &1)) end)
+                Storage.insert(storage, info.table, columns, values)
+              else
+                {:ok, 0}
+              end
+
+            case insert_result do
+              {:ok, _} ->
+                {:ok, %{message: "Table #{table_name} created"}}
+
+              {:error, _} = error ->
+                drop_table_ignore_errors(storage, info.table)
+                error
+            end
+
+          error ->
+            error
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp drop_table_ignore_errors(storage, table_name) do
+    case Storage.drop_table(storage, table_name) do
+      :ok -> :ok
+      _ -> :ok
+    end
   end
 
   # Resolve call arguments to actual values

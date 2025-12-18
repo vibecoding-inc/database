@@ -120,7 +120,12 @@ defmodule VibeDb.QueryExecutor do
               {:ok, %{message: "Table #{table_name} created"}}
 
             {:error, _} = error ->
-              Storage.drop_table(storage, info.table)
+              _ =
+                case Storage.drop_table(storage, info.table) do
+                  :ok -> :ok
+                  {:error, _} -> :ok
+                end
+
               error
           end
         else

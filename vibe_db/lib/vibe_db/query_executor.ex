@@ -478,6 +478,7 @@ defmodule VibeDb.QueryExecutor do
   end
 
   defp execute_create_table_as_select(storage, info, schema, table_name, select_info) do
+    # Validate source query first; only create the target table after the SELECT succeeds.
     case Storage.select(
            storage,
            select_info.table,
@@ -504,7 +505,7 @@ defmodule VibeDb.QueryExecutor do
                 {:ok, %{message: "Table #{table_name} created"}}
 
               {:error, _} = error ->
-                drop_table_ignore_errors(storage, info.table)
+                cleanup_drop_table(storage, info.table)
                 error
             end
 
@@ -517,7 +518,8 @@ defmodule VibeDb.QueryExecutor do
     end
   end
 
-  defp drop_table_ignore_errors(storage, table_name) do
+  # Best-effort cleanup used when post-creation inserts fail; errors are ignored deliberately.
+  defp cleanup_drop_table(storage, table_name) do
     case Storage.drop_table(storage, table_name, false) do
       :ok -> :ok
       _ -> :ok

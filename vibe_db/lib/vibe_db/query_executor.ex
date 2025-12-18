@@ -74,14 +74,14 @@ defmodule VibeDb.QueryExecutor do
 
           {:error, _} ->
             %{
-              columns: info.columns,
+              columns: Map.get(info, :columns, []),
               constraints: Map.get(info, :constraints, []),
               indexes: %{}
             }
         end
       else
         %{
-          columns: info.columns,
+          columns: Map.get(info, :columns, []),
           constraints: Map.get(info, :constraints, []),
           indexes: %{}
         }
@@ -89,38 +89,43 @@ defmodule VibeDb.QueryExecutor do
 
     table_name = String.upcase(info.table)
 
-    case Storage.create_table(storage, info.table, schema) do
-      :ok ->
-        # Handle CREATE TABLE AS SELECT
-        case Map.get(info, :as_select) do
-          nil ->
-            {:ok, %{message: "Table #{table_name} created"}}
-
-          select_info ->
-            # Execute the select and insert results
-            case Storage.select(
-                   storage,
-                   select_info.table,
-                   select_info.columns,
-                   select_info.where,
-                   select_info.order_by
-                 ) do
-              {:ok, rows} ->
-                if length(rows) > 0 do
-                  columns = Map.keys(hd(rows))
-                  values = Enum.map(rows, fn row -> Enum.map(columns, &Map.get(row, &1)) end)
-                  Storage.insert(storage, info.table, columns, values)
-                end
-
-                {:ok, %{message: "Table #{table_name} created"}}
-
-              error ->
-                error
-            end
+    case Map.get(info, :as_select) do
+      nil ->
+        case Storage.create_table(storage, info.table, schema) do
+          :ok -> {:ok, %{message: "Table #{table_name} created"}}
+          error -> error
         end
 
-      error ->
-        error
+      select_info ->
+        with {:ok, rows} <-
+               Storage.select(
+                 storage,
+                 select_info.table,
+                 select_info.columns,
+                 select_info.where,
+                 select_info.order_by
+               ),
+             :ok <- Storage.create_table(storage, info.table, schema) do
+          insert_result =
+            if length(rows) > 0 do
+              columns = Map.keys(hd(rows))
+              values = Enum.map(rows, fn row -> Enum.map(columns, &Map.get(row, &1)) end)
+              Storage.insert(storage, info.table, columns, values)
+            else
+              {:ok, 0}
+            end
+
+          case insert_result do
+            {:ok, _} ->
+              {:ok, %{message: "Table #{table_name} created"}}
+
+            {:error, _} = error ->
+              Storage.drop_table(storage, info.table)
+              error
+          end
+        else
+          {:error, _} = error -> error
+        end
     end
   end
 

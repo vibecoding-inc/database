@@ -38,6 +38,12 @@ defmodule VibeDbTest do
       refute VibeDb.table_exists?(db, "temp")
     end
 
+    test "CREATE TABLE AS SELECT is atomic on failure", %{db: db} do
+      result = VibeDb.execute(db, "CREATE TABLE copy_users AS SELECT * FROM missing_source")
+      assert {:error, _} = result
+      refute VibeDb.table_exists?(db, "copy_users")
+    end
+
     test "ALTER TABLE ADD COLUMN", %{db: db} do
       VibeDb.execute(db, "CREATE TABLE products (id NUMBER)")
       result = VibeDb.execute(db, "ALTER TABLE products ADD name VARCHAR2(100)")

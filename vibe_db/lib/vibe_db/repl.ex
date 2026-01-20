@@ -2,45 +2,51 @@ defmodule VibeDb.Repl do
   @moduledoc """
   Interactive REPL (Read-Eval-Print Loop) for VibeDb.
 
-  Provides a command-line interface for executing SQL statements against
-  an in-memory VibeDb database.
+  Provides a command-line interface for executing SQL and NoSQL statements against
+  an in-memory VibeDb database. Supports runtime switching between SQL and NoSQL modes.
 
   ## Commands
 
   - `.help` - Show available commands
-  - `.tables` - List all tables
+  - `.mode [sql|nosql]` - Show or switch database mode
+  - `.tables` - List all tables/collections
   - `.schema <table>` - Show table schema
   - `.types` - List all user-defined types
   - `.views` - List all views
-  - `.sequences` - List all sequences (coming soon)
+  - `.sequences` - List all sequences
   - `.clear` - Clear the screen
   - `.exit` or `.quit` - Exit the REPL
-  - Any SQL statement - Execute against the database
+  - Any SQL statement (in SQL mode) - Execute against the database
+  - Any NoSQL command (in NoSQL mode) - Execute against the database
 
-  ## Examples
+  ## SQL Mode Examples
 
-      $ vibe_db
-      VibeDb REPL v0.1.0
-      Type .help for available commands, .exit to quit.
-
-      vibedb> CREATE TABLE users (id NUMBER, name VARCHAR2(100));
+      vibedb:sql> CREATE TABLE users (id NUMBER, name VARCHAR2(100));
       OK: Table USERS created
 
-      vibedb> INSERT INTO users VALUES (1, 'Alice');
+      vibedb:sql> INSERT INTO users VALUES (1, 'Alice');
       OK: 1 row(s) inserted
 
-      vibedb> SELECT * FROM users;
-      +----+-------+
+      vibedb:sql> SELECT * FROM users;
       | ID | NAME  |
       +----+-------+
       | 1  | Alice |
-      +----+-------+
       1 row(s) returned
+
+  ## NoSQL Mode Examples
+
+      vibedb:nosql> db.users.insert({name: "Alice", age: 30})
+      OK: {"acknowledged": true, "insertedCount": 1}
+
+      vibedb:nosql> db.users.find({name: "Alice"})
+      {"_id": "...", "name": "Alice", "age": 30}
+
+      vibedb:nosql> db.users.update({name: "Alice"}, {$set: {age: 31}})
+      OK: {"acknowledged": true, "modifiedCount": 1}
 
   """
 
   @version Mix.Project.config()[:version] || "0.1.0"
-  @prompt "vibedb> "
 
   @doc """
   Main entry point for the escript.
@@ -48,6 +54,7 @@ defmodule VibeDb.Repl do
   def main(_args \\ []) do
     IO.puts("VibeDb REPL v#{@version}")
     IO.puts("Type .help for available commands, .exit to quit.")
+    IO.puts("Current mode: SQL. Use .mode nosql to switch to NoSQL mode.")
     IO.puts("")
 
     {:ok, db} = VibeDb.start_link()
@@ -60,12 +67,21 @@ defmodule VibeDb.Repl do
   def start(db) do
     IO.puts("VibeDb REPL v#{@version}")
     IO.puts("Type .help for available commands, .exit to quit.")
+    mode = VibeDb.get_mode(db)
+    IO.puts("Current mode: #{String.upcase(to_string(mode))}. Use .mode to switch modes.")
     IO.puts("")
     loop(db)
   end
 
+  defp get_prompt(db) do
+    mode = VibeDb.get_mode(db)
+    "vibedb:#{mode}> "
+  end
+
   defp loop(db) do
-    case IO.gets(@prompt) do
+    prompt = get_prompt(db)
+
+    case IO.gets(prompt) do
       :eof ->
         IO.puts("\nGoodbye!")
         :ok
@@ -93,8 +109,34 @@ defmodule VibeDb.Repl do
   defp process_input(_db, ".exit"), do: :exit
   defp process_input(_db, ".quit"), do: :exit
 
-  defp process_input(_db, ".help") do
-    print_help()
+  defp process_input(db, ".help") do
+    print_help(db)
+    :continue
+  end
+
+  defp process_input(db, ".mode") do
+    mode = VibeDb.get_mode(db)
+    IO.puts("Current mode: #{String.upcase(to_string(mode))}")
+    IO.puts("Use .mode sql or .mode nosql to switch modes.")
+    :continue
+  end
+
+  defp process_input(db, ".mode " <> mode_str) do
+    mode_str = String.trim(mode_str) |> String.downcase()
+
+    case mode_str do
+      "sql" ->
+        VibeDb.set_mode(db, :sql)
+        IO.puts("Switched to SQL mode.")
+
+      "nosql" ->
+        VibeDb.set_mode(db, :nosql)
+        IO.puts("Switched to NoSQL mode.")
+
+      _ ->
+        IO.puts("Invalid mode: #{mode_str}. Use 'sql' or 'nosql'.")
+    end
+
     :continue
   end
 
@@ -317,13 +359,27 @@ defmodule VibeDb.Repl do
     :continue
   end
 
-  defp process_input(db, sql) do
+  defp process_input(db, input) do
+    mode = VibeDb.get_mode(db)
+
+    case mode do
+      :sql ->
+        execute_sql_input(db, input)
+
+      :nosql ->
+        execute_nosql_input(db, input)
+    end
+
+    :continue
+  end
+
+  defp execute_sql_input(db, sql) do
     # Collect multi-line SQL until we get a semicolon
     sql = collect_multiline_sql(sql)
-    
+
     # Don't trim the trailing semicolon for PL/SQL blocks - they need it for proper parsing
     # The SqlParser will handle trimming the semicolon after validation
-    sql = 
+    sql =
       if VibeDb.SqlParser.is_plsql_block?(String.trim(sql)) do
         sql
       else
@@ -331,8 +387,73 @@ defmodule VibeDb.Repl do
       end
 
     execute_sql(db, sql)
-    :continue
   end
+
+  defp execute_nosql_input(db, command) do
+    # NoSQL commands don't need semicolon handling
+    case VibeDb.execute(db, command) do
+      {:ok, documents} when is_list(documents) ->
+        print_nosql_results(documents)
+
+      {:ok, %{acknowledged: true} = result} ->
+        IO.puts("OK: #{format_nosql_result(result)}")
+
+      {:ok, %{ok: 1} = result} ->
+        IO.puts("OK: #{format_nosql_result(result)}")
+
+      {:ok, count} when is_integer(count) ->
+        IO.puts("Count: #{count}")
+
+      {:ok, other} ->
+        IO.puts("OK: #{format_nosql_result(other)}")
+
+      {:error, reason} ->
+        IO.puts("Error: #{reason}")
+    end
+  end
+
+  defp print_nosql_results([]) do
+    IO.puts("No documents found.")
+  end
+
+  defp print_nosql_results(documents) do
+    Enum.each(documents, fn doc ->
+      IO.puts(format_nosql_document(doc))
+    end)
+
+    IO.puts("#{length(documents)} document(s) found.")
+  end
+
+  defp format_nosql_document(doc) when is_map(doc) do
+    doc
+    |> Enum.map(fn {k, v} -> "\"#{k}\": #{format_nosql_value(v)}" end)
+    |> Enum.join(", ")
+    |> then(&"{ #{&1} }")
+  end
+
+  defp format_nosql_document(value), do: inspect(value)
+
+  defp format_nosql_value(nil), do: "null"
+  defp format_nosql_value(true), do: "true"
+  defp format_nosql_value(false), do: "false"
+  defp format_nosql_value(s) when is_binary(s), do: "\"#{s}\""
+  defp format_nosql_value(n) when is_number(n), do: to_string(n)
+  defp format_nosql_value(m) when is_map(m), do: format_nosql_document(m)
+
+  defp format_nosql_value(l) when is_list(l) do
+    "[" <> Enum.map_join(l, ", ", &format_nosql_value/1) <> "]"
+  end
+
+  defp format_nosql_value(other), do: inspect(other)
+
+  defp format_nosql_result(result) when is_map(result) do
+    result
+    |> Enum.map(fn {k, v} -> "\"#{k}\": #{format_nosql_value(v)}" end)
+    |> Enum.join(", ")
+    |> then(&"{ #{&1} }")
+  end
+
+  defp format_nosql_result(value), do: inspect(value)
 
   defp collect_multiline_sql(sql) do
     trimmed = String.trim(sql)
@@ -490,11 +611,16 @@ defmodule VibeDb.Repl do
     end
   end
 
-  defp print_help do
+  defp print_help(db) do
+    mode = VibeDb.get_mode(db)
+
     IO.puts("""
+    Current mode: #{String.upcase(to_string(mode))}
+
     Available commands:
       .help              Show this help message
-      .tables            List all tables
+      .mode [sql|nosql]  Show or switch database mode
+      .tables            List all tables/collections
       .schema <table>    Show table schema
       .types             List all user-defined types
       .views             List all views
@@ -509,14 +635,29 @@ defmodule VibeDb.Repl do
       .clear             Clear the screen
       .exit, .quit       Exit the REPL
 
-    SQL commands:
+    SQL Mode Commands (use .mode sql):
       Any valid VibeDb SQL statement (end with semicolon for multi-line)
 
-    Examples:
-      CREATE TABLE users (id NUMBER, name VARCHAR2(100));
-      INSERT INTO users VALUES (1, 'Alice');
-      SELECT * FROM users;
-      SELECT SYSDATE FROM DUAL;
+      Examples:
+        CREATE TABLE users (id NUMBER, name VARCHAR2(100));
+        INSERT INTO users VALUES (1, 'Alice');
+        SELECT * FROM users;
+        SELECT SYSDATE FROM DUAL;
+
+    NoSQL Mode Commands (use .mode nosql):
+      MongoDB-style document commands
+
+      Examples:
+        db.users.insert({name: "Alice", age: 30})
+        db.users.find({name: "Alice"})
+        db.users.findOne({age: 30})
+        db.users.update({name: "Alice"}, {$set: {age: 31}})
+        db.users.delete({name: "Alice"})
+        db.users.drop()
+        db.getCollectionNames()
+        db.createCollection("products")
+
+    Storage:
       .save mydb.xml
       .load mydb.xml
     """)

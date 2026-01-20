@@ -1781,10 +1781,125 @@ defmodule VibeDb.Storage do
     parse_raw_condition(row, tokens)
   end
 
+  # NoSQL-specific conditions
+  defp evaluate_condition(row, {:nosql_field_match, field, value}) do
+    doc = get_nosql_document(row)
+    doc_value = get_nested_value(doc, field)
+    doc_value == value
+  end
+
+  defp evaluate_condition(row, {:nosql_field_ne, field, value}) do
+    doc = get_nosql_document(row)
+    doc_value = get_nested_value(doc, field)
+    doc_value != value
+  end
+
+  defp evaluate_condition(row, {:nosql_field_gt, field, value}) do
+    doc = get_nosql_document(row)
+    doc_value = get_nested_value(doc, field)
+    doc_value != nil and doc_value > value
+  end
+
+  defp evaluate_condition(row, {:nosql_field_gte, field, value}) do
+    doc = get_nosql_document(row)
+    doc_value = get_nested_value(doc, field)
+    doc_value != nil and doc_value >= value
+  end
+
+  defp evaluate_condition(row, {:nosql_field_lt, field, value}) do
+    doc = get_nosql_document(row)
+    doc_value = get_nested_value(doc, field)
+    doc_value != nil and doc_value < value
+  end
+
+  defp evaluate_condition(row, {:nosql_field_lte, field, value}) do
+    doc = get_nosql_document(row)
+    doc_value = get_nested_value(doc, field)
+    doc_value != nil and doc_value <= value
+  end
+
+  defp evaluate_condition(row, {:nosql_field_in, field, values}) do
+    doc = get_nosql_document(row)
+    doc_value = get_nested_value(doc, field)
+    doc_value in values
+  end
+
+  defp evaluate_condition(row, {:nosql_field_nin, field, values}) do
+    doc = get_nosql_document(row)
+    doc_value = get_nested_value(doc, field)
+    doc_value not in values
+  end
+
+  defp evaluate_condition(row, {:nosql_field_exists, field, should_exist}) do
+    doc = get_nosql_document(row)
+    has_field = has_nested_key?(doc, field)
+    has_field == should_exist
+  end
+
   defp evaluate_condition(_row, condition) do
     IO.puts("[DEBUG storage.ex:evaluate_condition] Unhandled condition type: #{inspect(condition)}")
     true
   end
+
+  # Extract NoSQL document from row (either from _doc column or treat row as document)
+  defp get_nosql_document(row) do
+    case Map.get(row, "_doc") || Map.get(row, "_DOC") do
+      nil -> Map.delete(row, "__ROWNUM__")
+      doc when is_map(doc) -> doc
+      _ -> row
+    end
+  end
+
+  # Get a potentially nested value from a document using dot notation
+  defp get_nested_value(doc, field) when is_binary(field) do
+    parts = String.split(field, ".")
+    get_nested_value_impl(doc, parts)
+  end
+
+  defp get_nested_value(doc, field), do: Map.get(doc, field)
+
+  defp get_nested_value_impl(nil, _parts), do: nil
+  defp get_nested_value_impl(value, []), do: value
+
+  defp get_nested_value_impl(doc, [part | rest]) when is_map(doc) do
+    value = Map.get(doc, part) || Map.get(doc, String.to_atom(part))
+    get_nested_value_impl(value, rest)
+  end
+
+  defp get_nested_value_impl(list, [part | rest]) when is_list(list) do
+    case Integer.parse(part) do
+      {idx, ""} -> get_nested_value_impl(Enum.at(list, idx), rest)
+      _ -> nil
+    end
+  end
+
+  defp get_nested_value_impl(_value, _parts), do: nil
+
+  # Check if a nested key exists in the document
+  defp has_nested_key?(doc, field) when is_binary(field) do
+    parts = String.split(field, ".")
+    has_nested_key_impl?(doc, parts)
+  end
+
+  defp has_nested_key?(doc, field) do
+    Map.has_key?(doc, field) or Map.has_key?(doc, to_string(field))
+  end
+
+  defp has_nested_key_impl?(nil, _parts), do: false
+  defp has_nested_key_impl?(_value, []), do: true
+
+  defp has_nested_key_impl?(doc, [part | rest]) when is_map(doc) do
+    has_key = Map.has_key?(doc, part) or Map.has_key?(doc, String.to_atom(part))
+
+    if has_key do
+      value = Map.get(doc, part) || Map.get(doc, String.to_atom(part))
+      has_nested_key_impl?(value, rest)
+    else
+      false
+    end
+  end
+
+  defp has_nested_key_impl?(_value, _parts), do: false
 
   # Check if a column exists in the row (case-insensitive)
   defp column_exists?(row, column) when is_binary(column) do

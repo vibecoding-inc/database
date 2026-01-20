@@ -1862,7 +1862,8 @@ defmodule VibeDb.Storage do
   defp get_nested_value_impl(value, []), do: value
 
   defp get_nested_value_impl(doc, [part | rest]) when is_map(doc) do
-    value = Map.get(doc, part) || Map.get(doc, String.to_atom(part))
+    # Try string key first, then existing atom to avoid atom table exhaustion
+    value = Map.get(doc, part) || get_existing_atom_value(doc, part)
     get_nested_value_impl(value, rest)
   end
 
@@ -1874,6 +1875,16 @@ defmodule VibeDb.Storage do
   end
 
   defp get_nested_value_impl(_value, _parts), do: nil
+
+  # Safely get value by existing atom key without creating new atoms
+  defp get_existing_atom_value(doc, key) when is_binary(key) do
+    try do
+      atom_key = String.to_existing_atom(key)
+      Map.get(doc, atom_key)
+    rescue
+      ArgumentError -> nil
+    end
+  end
 
   # Check if a nested key exists in the document
   defp has_nested_key?(doc, field) when is_binary(field) do
@@ -1889,10 +1900,10 @@ defmodule VibeDb.Storage do
   defp has_nested_key_impl?(_value, []), do: true
 
   defp has_nested_key_impl?(doc, [part | rest]) when is_map(doc) do
-    has_key = Map.has_key?(doc, part) or Map.has_key?(doc, String.to_atom(part))
+    has_key = Map.has_key?(doc, part) or has_existing_atom_key?(doc, part)
 
     if has_key do
-      value = Map.get(doc, part) || Map.get(doc, String.to_atom(part))
+      value = Map.get(doc, part) || get_existing_atom_value(doc, part)
       has_nested_key_impl?(value, rest)
     else
       false
@@ -1900,6 +1911,16 @@ defmodule VibeDb.Storage do
   end
 
   defp has_nested_key_impl?(_value, _parts), do: false
+
+  # Check if map has key as existing atom without creating new atoms
+  defp has_existing_atom_key?(doc, key) when is_binary(key) do
+    try do
+      atom_key = String.to_existing_atom(key)
+      Map.has_key?(doc, atom_key)
+    rescue
+      ArgumentError -> false
+    end
+  end
 
   # Check if a column exists in the row (case-insensitive)
   defp column_exists?(row, column) when is_binary(column) do

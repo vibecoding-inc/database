@@ -441,70 +441,242 @@ defmodule VibeDb.NosqlParser do
 
   @doc """
   Decode a JSON string into an Elixir term.
-  Uses a simple recursive descent parser.
+  Uses a safe recursive descent parser (no Code.eval_string).
   All map keys are converted to strings for consistency.
   """
   @spec decode_json(String.t()) :: {:ok, any()} | {:error, String.t()}
   def decode_json(str) do
     str = String.trim(str)
-    # Simple JSON parsing - convert to Elixir-compatible format
 
-    # Replace single quotes with double quotes for consistency
-    # Handle field names without quotes (MongoDB style)
-    normalized = normalize_json(str)
-
-    try do
-      # Use Code.eval_string with proper escaping
-      {result, _} =
-        normalized
-        |> convert_json_to_elixir()
-        |> Code.eval_string()
-
-      # Normalize all map keys to strings
-      {:ok, stringify_keys(result)}
-    rescue
-      e ->
-        {:error, "JSON parse error: #{Exception.message(e)}"}
+    case safe_parse_value(str) do
+      {:ok, value, _rest} -> {:ok, value}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  # Recursively convert all map keys to strings
-  defp stringify_keys(map) when is_map(map) do
-    Map.new(map, fn {k, v} ->
-      {to_string(k), stringify_keys(v)}
-    end)
+  # Safe recursive descent JSON parser - no Code.eval_string
+  defp safe_parse_value(str) do
+    str = String.trim(str)
+
+    cond do
+      String.starts_with?(str, "{") ->
+        safe_parse_object(str)
+
+      String.starts_with?(str, "[") ->
+        safe_parse_array(str)
+
+      String.starts_with?(str, "\"") ->
+        safe_parse_string(str)
+
+      String.starts_with?(str, "'") ->
+        # Convert single quotes to double quotes for consistency
+        safe_parse_single_quoted_string(str)
+
+      str == "" ->
+        {:ok, nil, ""}
+
+      true ->
+        safe_parse_literal(str)
+    end
   end
 
-  defp stringify_keys(list) when is_list(list) do
-    Enum.map(list, &stringify_keys/1)
+  defp safe_parse_object(str) do
+    # Remove opening brace
+    rest = String.slice(str, 1..-1//1) |> String.trim()
+
+    if String.starts_with?(rest, "}") do
+      {:ok, %{}, String.slice(rest, 1..-1//1)}
+    else
+      safe_parse_object_pairs(rest, %{})
+    end
   end
 
-  defp stringify_keys(value), do: value
+  defp safe_parse_object_pairs(str, acc) do
+    str = String.trim(str)
 
-  defp normalize_json(str) do
-    str
-    # Replace unquoted field names with quoted ones
-    |> String.replace(~r/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)/, "\\1\"\\2\"\\3")
-    # Handle $operators in field names
-    |> String.replace(~r/([{,]\s*)(\$[a-zA-Z_][a-zA-Z0-9_]*)(\s*:)/, "\\1\"\\2\"\\3")
+    # Check for closing brace
+    if String.starts_with?(str, "}") do
+      {:ok, acc, String.slice(str, 1..-1//1)}
+    else
+      # Parse key (can be quoted or unquoted)
+      case safe_parse_key(str) do
+        {:ok, key, rest} ->
+          rest = String.trim(rest)
+
+          # Expect colon
+          if String.starts_with?(rest, ":") do
+            rest = String.slice(rest, 1..-1//1) |> String.trim()
+
+            # Parse value
+            case safe_parse_value(rest) do
+              {:ok, value, rest2} ->
+                acc = Map.put(acc, key, value)
+                rest2 = String.trim(rest2)
+
+                cond do
+                  String.starts_with?(rest2, ",") ->
+                    safe_parse_object_pairs(String.slice(rest2, 1..-1//1), acc)
+
+                  String.starts_with?(rest2, "}") ->
+                    {:ok, acc, String.slice(rest2, 1..-1//1)}
+
+                  rest2 == "" ->
+                    {:ok, acc, ""}
+
+                  true ->
+                    {:error, "Expected ',' or '}' after object value, got: #{String.slice(rest2, 0, 20)}"}
+                end
+
+              {:error, reason} ->
+                {:error, reason}
+            end
+          else
+            {:error, "Expected ':' after object key, got: #{String.slice(rest, 0, 20)}"}
+          end
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
   end
 
-  defp convert_json_to_elixir(str) do
-    str
-    # Convert JSON null to Elixir nil
-    |> String.replace(~r/\bnull\b/, "nil")
-    # Convert JSON true/false (already valid in Elixir)
-    # Convert JSON objects to Elixir maps
-    |> String.replace("{", "%{")
-    # Keep arrays as-is (they work the same)
-    # Handle double-quoted strings (already valid in Elixir)
-    # Convert single-quoted strings to double-quoted
-    |> convert_single_to_double_quotes()
+  defp safe_parse_key(str) do
+    str = String.trim(str)
+
+    cond do
+      String.starts_with?(str, "\"") ->
+        safe_parse_string(str)
+
+      String.starts_with?(str, "'") ->
+        safe_parse_single_quoted_string(str)
+
+      true ->
+        # Unquoted key (MongoDB style)
+        case Regex.run(~r/^(\$?[a-zA-Z_][a-zA-Z0-9_]*)/, str) do
+          [match, key] ->
+            rest = String.slice(str, String.length(match)..-1//1)
+            {:ok, key, rest}
+
+          nil ->
+            {:error, "Invalid key at: #{String.slice(str, 0, 20)}"}
+        end
+    end
   end
 
-  defp convert_single_to_double_quotes(str) do
-    # Simple conversion - doesn't handle all edge cases
-    str
-    |> String.replace(~r/'([^']*)'/, "\"\\1\"")
+  defp safe_parse_array(str) do
+    # Remove opening bracket
+    rest = String.slice(str, 1..-1//1) |> String.trim()
+
+    if String.starts_with?(rest, "]") do
+      {:ok, [], String.slice(rest, 1..-1//1)}
+    else
+      safe_parse_array_elements(rest, [])
+    end
+  end
+
+  defp safe_parse_array_elements(str, acc) do
+    str = String.trim(str)
+
+    if String.starts_with?(str, "]") do
+      {:ok, Enum.reverse(acc), String.slice(str, 1..-1//1)}
+    else
+      case safe_parse_value(str) do
+        {:ok, value, rest} ->
+          acc = [value | acc]
+          rest = String.trim(rest)
+
+          cond do
+            String.starts_with?(rest, ",") ->
+              safe_parse_array_elements(String.slice(rest, 1..-1//1), acc)
+
+            String.starts_with?(rest, "]") ->
+              {:ok, Enum.reverse(acc), String.slice(rest, 1..-1//1)}
+
+            rest == "" ->
+              {:ok, Enum.reverse(acc), ""}
+
+            true ->
+              {:error, "Expected ',' or ']' after array element, got: #{String.slice(rest, 0, 20)}"}
+          end
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp safe_parse_string(str) do
+    # Remove opening quote
+    rest = String.slice(str, 1..-1//1)
+    safe_parse_string_content(rest, "", "\"")
+  end
+
+  defp safe_parse_single_quoted_string(str) do
+    # Remove opening quote
+    rest = String.slice(str, 1..-1//1)
+    safe_parse_string_content(rest, "", "'")
+  end
+
+  defp safe_parse_string_content("", acc, _quote) do
+    {:error, "Unterminated string: #{acc}"}
+  end
+
+  defp safe_parse_string_content(str, acc, quote) do
+    case String.next_grapheme(str) do
+      {^quote, rest} ->
+        {:ok, acc, rest}
+
+      {"\\", rest} ->
+        # Handle escape sequences
+        case String.next_grapheme(rest) do
+          {"n", rest2} -> safe_parse_string_content(rest2, acc <> "\n", quote)
+          {"t", rest2} -> safe_parse_string_content(rest2, acc <> "\t", quote)
+          {"r", rest2} -> safe_parse_string_content(rest2, acc <> "\r", quote)
+          {"\\", rest2} -> safe_parse_string_content(rest2, acc <> "\\", quote)
+          {"\"", rest2} -> safe_parse_string_content(rest2, acc <> "\"", quote)
+          {"'", rest2} -> safe_parse_string_content(rest2, acc <> "'", quote)
+          {char, rest2} -> safe_parse_string_content(rest2, acc <> char, quote)
+          nil -> {:error, "Unterminated escape sequence"}
+        end
+
+      {char, rest} ->
+        safe_parse_string_content(rest, acc <> char, quote)
+
+      nil ->
+        {:error, "Unterminated string"}
+    end
+  end
+
+  defp safe_parse_literal(str) do
+    cond do
+      String.starts_with?(str, "true") ->
+        {:ok, true, String.slice(str, 4..-1//1)}
+
+      String.starts_with?(str, "false") ->
+        {:ok, false, String.slice(str, 5..-1//1)}
+
+      String.starts_with?(str, "null") ->
+        {:ok, nil, String.slice(str, 4..-1//1)}
+
+      true ->
+        # Try to parse as number
+        case Regex.run(~r/^(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/, str) do
+          [match, num_str] ->
+            rest = String.slice(str, String.length(match)..-1//1)
+
+            value =
+              if String.contains?(num_str, ".") or String.contains?(num_str, "e") or
+                   String.contains?(num_str, "E") do
+                String.to_float(num_str)
+              else
+                String.to_integer(num_str)
+              end
+
+            {:ok, value, rest}
+
+          nil ->
+            {:error, "Unexpected token at: #{String.slice(str, 0, 20)}"}
+        end
+    end
   end
 end

@@ -160,10 +160,12 @@ defmodule VibeDb.NosqlExecutor do
   defp normalize_collection(name), do: to_string(name) |> String.upcase()
 
   defp generate_id do
-    # Generate a simple unique ID (similar to MongoDB ObjectId but simplified)
+    # Generate a unique ID similar to MongoDB ObjectId
+    # Format: 8 bytes timestamp (ms) + 8 bytes random = 16 bytes = 32 hex chars
     timestamp = System.system_time(:millisecond)
-    random = :rand.uniform(0xFFFFFF)
-    Base.encode16(<<timestamp::48, random::24>>, case: :lower)
+    # Use crypto-secure random for better uniqueness
+    random = :crypto.strong_rand_bytes(8)
+    Base.encode16(<<timestamp::64>> <> random, case: :lower)
   end
 
   defp ensure_collection(storage, collection) do
@@ -355,8 +357,8 @@ defmodule VibeDb.NosqlExecutor do
     {:nosql_field_exists, to_string(field), false}
   end
 
-  defp build_operator_condition(_field, op, _value) do
-    IO.puts("[DEBUG] Unsupported NoSQL operator: #{op}")
+  defp build_operator_condition(_field, _op, _value) do
+    # Unsupported operator - ignore silently
     nil
   end
 
@@ -426,7 +428,12 @@ defmodule VibeDb.NosqlExecutor do
 
         Enum.reduce(increments, doc, fn {field, amount}, acc ->
           current = Map.get(acc, field, 0)
-          Map.put(acc, field, current + amount)
+
+          # Ensure both values are numbers to prevent runtime errors
+          safe_current = if is_number(current), do: current, else: 0
+          safe_amount = if is_number(amount), do: amount, else: 0
+
+          Map.put(acc, field, safe_current + safe_amount)
         end)
 
       # No operators - treat as replacement (except for _id)

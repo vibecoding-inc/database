@@ -293,6 +293,51 @@ defmodule VibeDb do
     GenServer.call(server, :status)
   end
 
+  @doc """
+  Gets the current database mode (:sql or :nosql).
+
+  ## Examples
+
+      mode = VibeDb.get_mode(db)
+
+  """
+  @spec get_mode(server()) :: :sql | :nosql
+  def get_mode(server) do
+    GenServer.call(server, :get_mode)
+  end
+
+  @doc """
+  Sets the database mode (:sql or :nosql).
+  This allows runtime switching between SQL and NoSQL modes.
+
+  ## Examples
+
+      :ok = VibeDb.set_mode(db, :nosql)
+      :ok = VibeDb.set_mode(db, :sql)
+
+  """
+  @spec set_mode(server(), :sql | :nosql) :: :ok | {:error, String.t()}
+  def set_mode(server, mode) when mode in [:sql, :nosql] do
+    GenServer.call(server, {:set_mode, mode})
+  end
+
+  def set_mode(_server, mode) do
+    {:error, "Invalid mode: #{inspect(mode)}. Must be :sql or :nosql"}
+  end
+
+  @doc """
+  Executes a NoSQL command directly, regardless of current mode.
+
+  ## Examples
+
+      {:ok, result} = VibeDb.execute_nosql(db, "db.users.insert({name: 'Alice'})")
+
+  """
+  @spec execute_nosql(server(), String.t()) :: result()
+  def execute_nosql(server, command) when is_binary(command) do
+    GenServer.call(server, {:execute_nosql, command})
+  end
+
   # Server Callbacks
 
   @impl true
@@ -300,18 +345,46 @@ defmodule VibeDb do
     storage_name = :"#{inspect(self())}_storage"
     {:ok, storage_pid} = Storage.start_link(name: storage_name)
 
+    # Default mode is SQL for backward compatibility
+    initial_mode = Keyword.get(opts, :mode, :sql)
+
     state = %{
       storage: storage_pid,
-      opts: opts
+      opts: opts,
+      mode: initial_mode
     }
 
     {:ok, state}
   end
 
   @impl true
-  def handle_call({:execute, sql}, _from, state) do
-    result = QueryExecutor.execute(state.storage, sql)
+  def handle_call({:execute, command}, _from, state) do
+    result =
+      case state.mode do
+        :sql ->
+          QueryExecutor.execute(state.storage, command)
+
+        :nosql ->
+          VibeDb.NosqlExecutor.execute(state.storage, command)
+      end
+
     {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:execute_nosql, command}, _from, state) do
+    result = VibeDb.NosqlExecutor.execute(state.storage, command)
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call(:get_mode, _from, state) do
+    {:reply, state.mode, state}
+  end
+
+  @impl true
+  def handle_call({:set_mode, mode}, _from, state) do
+    {:reply, :ok, %{state | mode: mode}}
   end
 
   @impl true

@@ -52,6 +52,7 @@ An in-memory relational database implemented in Elixir that is compatible with V
 - Support for INSERT, UPDATE, DELETE events
 - UPDATE OF column triggers
 - WHEN clause conditions
+- `:OLD` and `:NEW` row references for accessing row data in triggers
 
 ### DML (Data Manipulation Language)
 - `SELECT` - Query data with WHERE, ORDER BY, and column projections
@@ -470,18 +471,18 @@ VibeDb.execute(db, "DROP PACKAGE user_pkg")
 ### Triggers
 
 ```elixir
-# Create a BEFORE INSERT trigger
+# Create a BEFORE INSERT trigger - executes before each INSERT
 VibeDb.execute(db, """
   CREATE TRIGGER audit_insert
   BEFORE INSERT ON users
   FOR EACH ROW
   BEGIN
     INSERT INTO audit_log (action, table_name, timestamp)
-    VALUES ('INSERT', 'users', SYSDATE);
+    VALUES ('INSERT', 'users', 1);
   END;
 """)
 
-# Create an AFTER UPDATE trigger
+# Create an AFTER UPDATE trigger with :OLD and :NEW row references
 VibeDb.execute(db, """
   CREATE TRIGGER audit_update
   AFTER UPDATE ON users
@@ -498,7 +499,7 @@ VibeDb.execute(db, """
   BEFORE INSERT OR UPDATE OR DELETE ON users
   FOR EACH ROW
   BEGIN
-    NULL;
+    INSERT INTO change_log (event) VALUES ('CHANGE');
   END;
 """)
 
@@ -508,7 +509,7 @@ VibeDb.execute(db, """
   BEFORE UPDATE OF salary ON employees
   FOR EACH ROW
   BEGIN
-    INSERT INTO salary_history VALUES (:OLD.salary, :NEW.salary, SYSDATE);
+    INSERT INTO salary_history (old_salary, new_salary) VALUES (:OLD.salary, :NEW.salary);
   END;
 """)
 
@@ -519,7 +520,7 @@ VibeDb.execute(db, """
   FOR EACH ROW
   WHEN (NEW.salary > 100000)
   BEGIN
-    RAISE_APPLICATION_ERROR(-20001, 'Salary exceeds limit');
+    INSERT INTO high_salary_log (salary) VALUES (:NEW.salary);
   END;
 """)
 
@@ -529,7 +530,7 @@ VibeDb.execute(db, """
   INSTEAD OF INSERT ON user_view
   FOR EACH ROW
   BEGIN
-    INSERT INTO users VALUES (:NEW.id, :NEW.name);
+    INSERT INTO users (id, name) VALUES (:NEW.id, :NEW.name);
   END;
 """)
 

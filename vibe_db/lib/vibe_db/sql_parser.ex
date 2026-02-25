@@ -1750,9 +1750,29 @@ defmodule VibeDb.SqlParser do
         {body_text, remaining}
 
       nil ->
-        {"", tokens}
+        # For triggers that start directly with BEGIN (no IS/AS)
+        case find_begin_start(tokens) do
+          {body_tokens} ->
+            {body_text, remaining} = collect_plsql_body(body_tokens, [], 0)
+            {body_text, remaining}
+
+          nil ->
+            {"", tokens}
+        end
     end
   end
+
+  # Find BEGIN keyword that starts the body (for triggers without IS/AS)
+  defp find_begin_start([token | rest]) when is_binary(token) do
+    if String.upcase(token) == "BEGIN" do
+      {[token | rest]}
+    else
+      find_begin_start(rest)
+    end
+  end
+
+  defp find_begin_start([_ | rest]), do: find_begin_start(rest)
+  defp find_begin_start([]), do: nil
 
   defp find_plsql_start(tokens) do
     find_plsql_start(tokens, [])

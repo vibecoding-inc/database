@@ -74,14 +74,14 @@ defmodule VibeDb.QueryExecutor do
 
           {:error, _} ->
             %{
-              columns: info.columns,
+              columns: Map.get(info, :columns, []),
               constraints: Map.get(info, :constraints, []),
               indexes: %{}
             }
         end
       else
         %{
-          columns: info.columns,
+          columns: Map.get(info, :columns, []),
           constraints: Map.get(info, :constraints, []),
           indexes: %{}
         }
@@ -89,38 +89,15 @@ defmodule VibeDb.QueryExecutor do
 
     table_name = String.upcase(info.table)
 
-    case Storage.create_table(storage, info.table, schema) do
-      :ok ->
-        # Handle CREATE TABLE AS SELECT
-        case Map.get(info, :as_select) do
-          nil ->
-            {:ok, %{message: "Table #{table_name} created"}}
-
-          select_info ->
-            # Execute the select and insert results
-            case Storage.select(
-                   storage,
-                   select_info.table,
-                   select_info.columns,
-                   select_info.where,
-                   select_info.order_by
-                 ) do
-              {:ok, rows} ->
-                if length(rows) > 0 do
-                  columns = Map.keys(hd(rows))
-                  values = Enum.map(rows, fn row -> Enum.map(columns, &Map.get(row, &1)) end)
-                  Storage.insert(storage, info.table, columns, values)
-                end
-
-                {:ok, %{message: "Table #{table_name} created"}}
-
-              error ->
-                error
-            end
+    case Map.get(info, :as_select) do
+      nil ->
+        case Storage.create_table(storage, info.table, schema) do
+          :ok -> {:ok, %{message: "Table #{table_name} created"}}
+          error -> error
         end
 
-      error ->
-        error
+      select_info ->
+        execute_create_table_as_select(storage, info, schema, table_name, select_info)
     end
   end
 
@@ -498,6 +475,55 @@ defmodule VibeDb.QueryExecutor do
 
   def execute_parsed(_storage, unknown) do
     {:error, "Unknown statement type: #{inspect(unknown)}"}
+  end
+
+  defp execute_create_table_as_select(storage, info, schema, table_name, select_info) do
+    # Validate source query first; only create the target table after the SELECT succeeds.
+    case Storage.select(
+           storage,
+           select_info.table,
+           select_info.columns,
+           select_info.where,
+           select_info.order_by
+         ) do
+      {:ok, rows} ->
+        case Storage.create_table(storage, info.table, schema) do
+          :ok ->
+            insert_result =
+              case rows do
+                [] ->
+                  {:ok, 0}
+
+                [first_row | _] ->
+                  columns = Map.keys(first_row)
+                  values = Enum.map(rows, fn row -> Enum.map(columns, &Map.get(row, &1)) end)
+                  Storage.insert(storage, info.table, columns, values)
+              end
+
+            case insert_result do
+              {:ok, _} ->
+                {:ok, %{message: "Table #{table_name} created"}}
+
+              {:error, _} = error ->
+                cleanup_drop_table(storage, info.table)
+                error
+            end
+
+          error ->
+            error
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # Best-effort cleanup used when post-creation inserts fail; errors are ignored deliberately.
+  defp cleanup_drop_table(storage, table_name) do
+    case Storage.drop_table(storage, table_name, false) do
+      :ok -> :ok
+      _ -> :ok
+    end
   end
 
   # Resolve call arguments to actual values
